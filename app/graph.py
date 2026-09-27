@@ -229,7 +229,23 @@ def escalate(state: GraphState) -> dict:
     to a human," rather than forcing out a low-confidence answer — this is
     core to your project's framing ("capture and scale SME judgment," not
     paper over uncertainty).
+
+    ALSO reached directly from input_guardrail when the question was blocked
+    (looks like it contains PII) — same "honest brief instead of proceeding"
+    shape, just a different reason and no evidence to reference.
     """
+    if state.blocked:
+        print(f"[escalate] input blocked: {state.block_reason}")
+        brief = DecisionBrief(
+            # Must contain "escalate" (lowercased) — output_guardrail's own
+            # zero-citations check uses that as its escalation signal, same
+            # as the confidence-based path below.
+            answer="AppMind escalated this question instead of investigating it.",
+            citations=[],
+            confidence_rationale=f"Blocked before investigation began: {state.block_reason}.",
+        )
+        return {"decision_brief": brief}
+
     print("[escalate] confidence too low or unresolved flags remain — escalating to human")
     brief = DecisionBrief(
         answer="AppMind could not reach sufficient confidence to answer automatically.",
@@ -311,6 +327,15 @@ def synthesis(state: GraphState) -> dict:
 # This is the mechanism that makes the graph a graph rather than a straight
 # line: the SAME node (e.g. `critic`) can lead to different next steps
 # depending on what's in the state.
+
+
+def route_after_input_guardrail(state: GraphState) -> str:
+    """
+    Blocked input (looks like it contains PII) skips straight to escalate —
+    no retrieval, no LLM calls. That's the whole point of an input guardrail:
+    catch bad input before spending money on it, not after.
+    """
+    return "escalate" if state.blocked else "supervisor"
 
 
 def route_after_supervisor(state: GraphState) -> str:
@@ -422,7 +447,6 @@ def build_graph():
     graph.set_entry_point("input_guardrail")
 
     # Fixed edges (always go from A to B, no branching):
-    graph.add_edge("input_guardrail", "supervisor")
     graph.add_edge("escalate", "output_guardrail")
     graph.add_edge("synthesis", "output_guardrail")
     graph.add_edge("output_guardrail", "memory_write")
@@ -434,6 +458,11 @@ def build_graph():
     graph.add_edge("research", "retriever")
 
     # Conditional edges — this is where pipeline_mode and the retry logic live.
+    graph.add_conditional_edges(
+        "input_guardrail",
+        route_after_input_guardrail,
+        {"escalate": "escalate", "supervisor": "supervisor"},
+    )
     graph.add_conditional_edges(
         "supervisor",
         route_after_supervisor,

@@ -5,6 +5,37 @@ plan). Statuses: **Complete** / **Pending** / **Paused** / **Superseded** /
 **TODO (later)**. See [FAILURES.md](FAILURES.md) for *why* things changed
 shape; this file is only *what state each piece is in*.
 
+## Capstone evaluation rubric (`capstone-eval-metrics.png`) — cross-check, 2026-09-27
+
+Transcribed from the image, then checked against the actual codebase (not
+assumed from memory) before writing docs, so gaps get found now rather than
+discovered by a grader.
+
+| Rubric item | Sub-item | Status | Where it lives / what's missing |
+|---|---|---|---|
+| Problem definition | Scoping | Complete | `docs/onepager.md` (converted from `docs/onepager.txt`, submitted last week) explicitly states narrow scope: one app, 3 question types. A real, already-submitted document a grader reads — not just CLAUDE.md |
+| Problem definition | Clarity | Partial — accepted as-is (Option A, 2026-09-27) | Prose is clear, but 4 unreconciled gaps vs. the actual build found on cross-check: (1) "Use cases" section names "Change-impact / will this fit review," never built, and never names "Incident/RCA," which was; (2) Success Metrics lists 5 metrics, only 3 built (Recall@K + Escalation Accuracy cut, see CLAUDE.md's own priority list + `summary.md`'s notes); (3) FastAPI named in stack, dropped; (4) "tickets" named as a data source, cut entirely (FAILURES.md #1). Deliberately not fixed in the onepager itself — deferred to a short "what changed since the onepager" note in the docs deliverable (#8) instead |
+| Data Processing | Sources | Complete (code); §3 cross-checked, Option A | `knowledge-domains/docs` (3 files) + `knowledge-domains/incidents` (4 files), real ingestion (`ingest/run_ingestion.py`); code sources via the AST server (`orderflow-app/`) + GitHub MCP. Onepager §3 checked against real contents: 5/7 claims hold, "tickets" already tracked as cut (FAILURES.md #1), "historical decisions" was a new finding — never built, never logged — now logged as FAILURES.md #21. Same Option A treatment as Clarity: not fixed in the onepager, deferred to the docs deliverable's "what changed" note |
+| Data Processing | Handling PII | Complete (code); statement still needed in #8 | `guardrails/input_guardrail.py` now actually detects PII-shaped input (email/phone/SSN regex) and blocks before any retrieval/LLM cost. A written PII statement (data is synthetic) for the docs deliverable is still separate, quick work |
+| Data Processing | Guardrails | Complete | Both guardrails are real now, not stubs — see Decisions log "PII/Guardrails implementation" entry. Input: blocks PII-looking questions, routes to `escalate` before any cost. Output: replaces (not just warns about) an uncited non-escalation brief with an honest one. Off-topic questions deliberately NOT filtered at input — already handled correctly via empty-retrieval → confidence 0.0 → escalate (ERROR CASE 4) |
+| System Design | Architecture | Complete (code), pending (docs) | Full LangGraph pipeline, 2 MCP servers (AST + GitHub), RAG, Postgres/Redis — all real and verified end-to-end. No architecture diagram/write-up yet for #8 |
+| System Design | Trade Offs | **Scattered, not consolidated** | Real trade-off decisions exist throughout the Decisions log below (psycopg vs sqlalchemy, external cache wrapper vs graph node, remote vs local Docker MCP, etc.), and CLAUDE.md names 3 required ones explicitly (agentic latency/cost vs RAG, per-domain vs flat index, retry cap vs resolution completeness) — all demonstrated concretely in the eval numbers already. None of this has been pulled into an actual "Trade-offs" section yet |
+| Evals | Task-specific | Complete | False-confidence rate, error-catch rate vs 4 planted traps, AST-deterministic Impact Analysis check (zero LLM cost), citation accuracy — bespoke to this project's real failure modes, not generic RAG metrics |
+| Evals | Error handling | Complete | 4/4 fault-injection cases passing (dead MCP, hung MCP, Qdrant down, empty retrieval) — reused across both eval re-runs this session, not duplicated |
+| Evals | Cost | Complete | `token_usage`/`mean_token_usage` tracked and reported per `pipeline_mode` |
+| Evals | Latency | Complete | `latency_ms` is now real (fixed this session — was always 0.0 before `started_at` was added), reported per `pipeline_mode` |
+
+**Bottom line:** Evals (all 4 sub-items) and the underlying System Design
+architecture are the strongest-covered areas — genuinely complete, not just
+claimed complete. The two real, *code-level* gaps are **PII handling** and
+**Guardrails** — both explicitly named rubric items, both currently
+non-functional stubs rather than just "undocumented." Problem Definition and
+the Trade-offs write-up are informationally covered but not yet consolidated
+into the actual docs deliverable (#8). Given PII/Guardrails are named rubric
+items with zero real implementation today (not a docs gap, a code gap), it's
+worth deciding whether to give them a minimal real implementation before
+docs/video, rather than only writing about intentions that were never built.
+
 ## Core pipeline (CLAUDE.md priority order)
 
 | # | Item | Status | Note |
@@ -24,7 +55,7 @@ shape; this file is only *what state each piece is in*.
 | 7 | Streamlit UI | Complete (V1) | `ui/streamlit_app.py`; verified end-to-end in the browser (real question -> real escalation -> real citations rendered). Only imports `app.graph`/`app.schemas` — no direct dependency on `agents/`/`rag/`/`mcp_clients/`, same boundary `evals/run_eval.py` uses. V2 fast-follow (not built): pipeline_mode selector, critique-flag display, retrieval/agent-error display, cost/latency footer — deliberately deferred per user's "start simple" steer |
 | 8 | Docs (4–5 pages) | Pending | blocked on #6 for the actual numbers; PII statement + Trade-offs section are "never cut" |
 | 9 | Demo video (3 min) | Pending | blocked on #6 and #7 |
-| 10 | `FAILURES.md` | Ongoing | actively maintained, 12 entries so far |
+| 10 | `FAILURES.md` | Ongoing | actively maintained, 19 entries so far (stale "12" count fixed 2026-09-27) |
 
 ## Housekeeping
 
@@ -308,6 +339,73 @@ question that simply doesn't name a component (e.g. B2, a clean control
 case), for a reason that has nothing to do with real system health. Caught
 by testing the exact B2 question before running the full 27-run eval, not
 after. See FAILURES.md #19.
+
+### 2026-09-27 — PII/Guardrails: real implementation, kept deliberately minimal
+Both guardrails were literal no-op stubs (confirmed by rereading them fresh,
+plus grepping the whole codebase for "PII" — the only hit was a docstring
+comment citing this exact rubric line, no actual logic). Fixed with the
+smallest change that makes them real:
+
+- **Input guardrail**: 3 plain regex patterns (email, phone, SSN) — stdlib
+  `re`, no LLM call, no new dependency. Deliberately scoped to PII only, not
+  "off-topic" too: off-topic questions are already handled correctly by the
+  existing empty-retrieval → `confidence_score=0.0` → escalate path (ERROR
+  CASE 4, already passing) — a second, cruder keyword-based off-topic filter
+  here would risk false-positiving a legitimate but unusually-phrased
+  question for no real gain.
+- **Blocking mechanism**: reused `escalate()` rather than adding a new node.
+  2 new `GraphState` fields (`blocked`, `block_reason`), 1 new routing
+  function (`route_after_input_guardrail`, same pattern as the 5 already in
+  `graph.py`), the fixed `input_guardrail → supervisor` edge became
+  conditional. No new node, no new file.
+- **Output guardrail**: same check it already had (zero citations, not an
+  escalation) — now actually replaces the brief with an honest fallback
+  instead of printing a warning and shipping the uncited answer anyway.
+
+**One real bug found and fixed during verification, not anticipated in the
+plan:** the blocked-input brief's `answer` text didn't contain the word
+"escalate", so the *existing* output_guardrail check (which detects
+escalations by searching `answer`, not `confidence_rationale`) didn't
+recognize it and overwrote the specific PII reason with a generic message.
+Fixed by adjusting the blocked-brief's wording to match what the existing
+check already looks for — a one-line fix, not a redesign of the detection
+logic itself.
+
+**Verified for real:** PII patterns tested against every real dataset
+question (zero false positives), a live PII-containing question blocked
+before any retrieval/LLM work (`llm_calls=0`, `token_usage=0`), full 3-mode
+graph smoke test still passing, no regressions in any existing test suite.
+
+### 2026-09-27 — `orderflow-app/` was missing entirely after the repo migration; restored
+Found while regression-testing the guardrails change (unrelated to it):
+`mcp_servers.test_ast_server` failed with `AST root does not exist`. The new
+`app-mind` repo had no `orderflow-app/` folder anywhere — not merged into
+`app/`, not moved, genuinely absent. This broke the custom AST server
+entirely (`list_components`/`get_dependents`/`get_callers` couldn't even
+start), which silently broke two things: Impact Analysis questions
+(D3/B4), and Incident RCA's GitHub code-read (which depends on AST
+resolving a file path first — see the 2026-09-27 GitHub MCP entries above).
+
+**Discussed before fixing, not assumed:** the user asked why a local copy
+was needed at all, given the stated principle that code access should go
+through MCP. Real answer: the custom AST server and the GitHub MCP client
+do two different jobs. GitHub MCP fetches one file's text on demand for
+citations — already fully remote, matches the principle. The AST server
+builds a *cross-file* dependency/call graph, which needs every file parsed
+together, not fetched one-at-a-time over the network — this is why
+CLAUDE.md's own wording calls it an "offline AST walk" (deliberate, not an
+oversight), and matches how real static-analysis tools work (clone, then
+analyze locally, same reason CodeQL/SonarQube do it that way). Making the
+AST server itself fully GitHub-MCP-native (fetch every file via
+`get_file_contents` before parsing) is legitimate future work, not
+something to build under this deadline — treated the same as the other
+explicitly-deferred items below.
+
+**Fix:** user copied `orderflow-app/` from the old `ai-capstone/` checkout
+(source verified intact there first) into the new repo — purely additive,
+matches CLAUDE.md's expected `orderflow-app/app/` layout exactly. Re-ran the
+full regression after: AST server 14/14 again, both the impact_analysis and
+incident_rca-via-GitHub chains confirmed working end-to-end, zero errors.
 
 ## Explicitly deferred to after submission (per CLAUDE.md — do not build)
 

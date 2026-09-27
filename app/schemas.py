@@ -209,6 +209,13 @@ class GraphState(BaseModel):
     # reading only makes sense within the process that took it, so this is
     # bookkeeping for this one graph run, not something later persisted itself.
 
+    # --- Set by input_guardrail; read by route_after_input_guardrail/escalate ---
+    blocked: bool = False
+    block_reason: str = ""
+    # Set together when input_guardrail rejects the question outright (looks
+    # like it contains PII) before any retrieval or LLM call happens. Routes
+    # straight to escalate() instead of supervisor — see graph.py.
+
     # --- Set by the Supervisor Agent (first real node after guardrails) ---
     question_type: Optional[str] = None
     # e.g. "business_functional", "incident_rca", "impact_analysis"

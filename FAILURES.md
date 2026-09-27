@@ -15,6 +15,22 @@ why, what we did, and what it costs us.
 - **Why:** OrderFlow is a synthetic app with no real hosted repo, so there is nothing for GitHub MCP to read.
 - **Cost:** None functionally. `.env` still carries unused `GITHUB_TOKEN` / `GITHUB_TARGET_REPO` keys; `impl-plan.md` is stale on this point (`CLAUDE.md` is authoritative).
 
+### 21. "Historical decisions" knowledge domain never built — unlike "tickets," never logged as cut (found 2026-09-27)
+- **What:** `docs/onepager.md` §3 ("Data Surface") lists "historical decisions" as
+  one of the knowledge base's potential content types, alongside architecture
+  docs, runbooks, and incident reports. No such domain was ever built —
+  no ADR-style file, nothing anywhere in `knowledge-domains/` covers it.
+- **Why it's distinct from #1 ("tickets"):** tickets was a deliberate,
+  explicitly-logged cut, made and recorded at the time. "Historical
+  decisions" was never mentioned again after the onepager — not built, not
+  cut on purpose, just silently absent. Found only by cross-checking the
+  onepager's own claims against the real `knowledge-domains/` contents.
+- **Cost:** Minor — nothing currently depends on it, and none of the 9 eval
+  dataset questions need it. Worth a line in the docs deliverable's "what
+  changed since the onepager" note (see TASKS.md's Problem Definition/Data
+  Processing rubric cross-check entries) rather than silently leaving the
+  onepager's claim unaddressed.
+
 ## Bugs found and fixed
 
 ### 3. Windows default encoding corrupted every ingested chunk (2026-09-27)
@@ -113,6 +129,49 @@ why, what we did, and what it costs us.
   rather than trusting that the page rendering correctly implies the rest
   of the path executed as expected — same principle as #8's "write the
   assertion for the behavior you want," applied to manual verification too.
+
+### 20. `orderflow-app/` missing entirely after the repo migration to `app-mind` — silently broke Impact Analysis AND Incident RCA's real-code citations (2026-09-27)
+- **What:** After the project moved from `ai-capstone/` to a fresh `app-mind`
+  repo (new git init, new GitHub remote), `orderflow-app/` — the synthetic
+  target app the custom AST server analyzes — was never copied over. Not
+  merged into `app/`, not moved elsewhere, genuinely absent from the new repo.
+- **Blast radius, not obvious at a glance:** the AST server couldn't even
+  start (`FileNotFoundError: AST root does not exist`), which broke
+  `list_components`/`get_dependents`/`get_callers` entirely. That silently
+  took down TWO capabilities, not one: Impact Analysis questions directly
+  (D3/B4), and separately, Incident RCA's GitHub-sourced real-code citations
+  (the INC-1001 payoff this whole session built) — because that path
+  resolves its target file *through* the AST server's `get_dependents` call
+  (`ASTLookupResult.file_paths`) before ever reaching GitHub MCP. A working
+  GitHub integration with a dead upstream dependency looks the same as a
+  broken one from the outside.
+- **How found:** A full regression run for an unrelated change (the
+  guardrails work) included `mcp_servers.test_ast_server`, which failed with
+  a clear, specific error rather than a vague timeout — the kind of thing
+  that's easy to miss if you only spot-check the change you just made instead
+  of running the full suite.
+- **Discussed before fixing, not assumed:** the user pushed back on "just
+  copy it over," asking why local access was needed at all given the
+  "access code through MCP" principle already established for GitHub reads.
+  Real answer, not just restating the fix: GitHub MCP and the AST server do
+  different jobs — GitHub MCP fetches one file's text on demand (already
+  fully remote); the AST server builds a *cross-file* dependency graph, which
+  needs every file parsed together, not fetched one-at-a-time over a network
+  API. CLAUDE.md's own wording already calls it an "offline AST walk" on
+  purpose, not by oversight — same reason real static-analysis tools
+  (CodeQL, SonarQube) clone a repo and analyze the checkout rather than call
+  a file-fetch API per file during analysis.
+- **Fix:** user copied `orderflow-app/` from the still-intact old
+  `ai-capstone/` checkout into the new repo (verified the source was correct
+  first). Re-ran the full regression suite after — AST server 14/14 again,
+  both the impact_analysis and incident_rca-via-GitHub chains confirmed
+  working end-to-end.
+- **Lesson:** a manual folder-based repo migration doesn't get the same
+  safety net a `git mv`/`git clone` gets — nothing complains about a missing
+  directory until something tries to use it, and here that something (the
+  AST server) was two capabilities removed from the thing that actually
+  broke first. Run the FULL regression suite after any manual filesystem
+  reorg, not just the tests for whatever you were actually changing.
 
 ### 19. AST "no code component identified" wrongly treated as a `retrieval_errors` entry once incident_rca started using AST tools too (2026-09-27)
 - **What:** Before re-running the full eval, tested B2 ("why were emails
