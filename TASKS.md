@@ -1,11 +1,12 @@
 # TASKS.md — living status tracker
 
-Updated as work happens (unlike CLAUDE.md/impl-plan.md, which are the fixed
-plan). Statuses: **Complete** / **Pending** / **Paused** / **Superseded** /
-**TODO (later)**. See [FAILURES.md](FAILURES.md) for *why* things changed
-shape; this file is only *what state each piece is in*.
+Updated as work happens — the living record of build status, distinct from
+CLAUDE.md's current-state project description. Statuses: **Complete** /
+**Pending** / **Paused** / **Superseded** / **TODO (later)**. See
+[FAILURES.md](FAILURES.md) for *why* things changed shape; this file is only
+*what state each piece is in*.
 
-## Capstone evaluation rubric (`capstone-eval-metrics.png`) — cross-check, 2026-09-27
+## Capstone evaluation rubric (`capstone-eval-metrics.png`) — cross-check
 
 Transcribed from the image, then checked against the actual codebase (not
 assumed from memory) before writing docs, so gaps get found now rather than
@@ -13,39 +14,35 @@ discovered by a grader.
 
 | Rubric item | Sub-item | Status | Where it lives / what's missing |
 |---|---|---|---|
-| Problem definition | Scoping | Complete | `docs/onepager.md` (converted from `docs/onepager.txt`, submitted last week) explicitly states narrow scope: one app, 3 question types. A real, already-submitted document a grader reads — not just CLAUDE.md |
-| Problem definition | Clarity | Partial — accepted as-is (Option A, 2026-09-27) | Prose is clear, but 4 unreconciled gaps vs. the actual build found on cross-check: (1) "Use cases" section names "Change-impact / will this fit review," never built, and never names "Incident/RCA," which was; (2) Success Metrics lists 5 metrics, only 3 built (Recall@K + Escalation Accuracy cut, see CLAUDE.md's own priority list + `summary.md`'s notes); (3) FastAPI named in stack, dropped; (4) "tickets" named as a data source, cut entirely (FAILURES.md #1). Deliberately not fixed in the onepager itself — deferred to a short "what changed since the onepager" note in the docs deliverable (#8) instead |
+| Problem definition | Scoping | Complete | `docs/onepager.md` (converted from `docs/onepager.txt`) explicitly states narrow scope: one app, 3 question types. A real, already-approved design document a grader reads — not just CLAUDE.md |
+| Problem definition | Clarity | Partial — accepted as-is (Option A) | Prose is clear, but 4 unreconciled gaps vs. the actual build found on cross-check: (1) "Use cases" section names "Change-impact / will this fit review," never built, and never names "Incident/RCA," which was; (2) Success Metrics lists 5 metrics, only 3 built (Recall@K + Escalation Accuracy cut, see `summary.md`'s notes); (3) FastAPI named in stack, dropped; (4) "tickets" named as a data source, cut entirely (FAILURES.md #1). Deliberately not fixed in the onepager itself — deferred to a short "what changed since the onepager" note in the docs deliverable (#8) instead |
 | Data Processing | Sources | Complete (code); §3 cross-checked, Option A | `knowledge-domains/docs` (3 files) + `knowledge-domains/incidents` (4 files), real ingestion (`ingest/run_ingestion.py`); code sources via the AST server (`orderflow-app/`) + GitHub MCP. Onepager §3 checked against real contents: 5/7 claims hold, "tickets" already tracked as cut (FAILURES.md #1), "historical decisions" was a new finding — never built, never logged — now logged as FAILURES.md #21. Same Option A treatment as Clarity: not fixed in the onepager, deferred to the docs deliverable's "what changed" note |
 | Data Processing | Handling PII | Complete (code); statement still needed in #8 | `guardrails/input_guardrail.py` now actually detects PII-shaped input (email/phone/SSN regex) and blocks before any retrieval/LLM cost. A written PII statement (data is synthetic) for the docs deliverable is still separate, quick work |
 | Data Processing | Guardrails | Complete | Both guardrails are real now, not stubs — see Decisions log "PII/Guardrails implementation" entry. Input: blocks PII-looking questions, routes to `escalate` before any cost. Output: replaces (not just warns about) an uncited non-escalation brief with an honest one. Off-topic questions deliberately NOT filtered at input — already handled correctly via empty-retrieval → confidence 0.0 → escalate (ERROR CASE 4) |
 | System Design | Architecture | Complete (code), pending (docs) | Full LangGraph pipeline, 2 MCP servers (AST + GitHub), RAG, Postgres/Redis — all real and verified end-to-end. No architecture diagram/write-up yet for #8 |
 | System Design | Trade Offs | **Scattered, not consolidated** | Real trade-off decisions exist throughout the Decisions log below (psycopg vs sqlalchemy, external cache wrapper vs graph node, remote vs local Docker MCP, etc.), and CLAUDE.md names 3 required ones explicitly (agentic latency/cost vs RAG, per-domain vs flat index, retry cap vs resolution completeness) — all demonstrated concretely in the eval numbers already. None of this has been pulled into an actual "Trade-offs" section yet |
 | Evals | Task-specific | Complete | False-confidence rate, error-catch rate vs 4 planted traps, AST-deterministic Impact Analysis check (zero LLM cost), citation accuracy — bespoke to this project's real failure modes, not generic RAG metrics |
-| Evals | Error handling | Complete | 4/4 fault-injection cases passing (dead MCP, hung MCP, Qdrant down, empty retrieval) — reused across both eval re-runs this session, not duplicated |
+| Evals | Error handling | Complete | 4/4 fault-injection cases passing (dead MCP, hung MCP, Qdrant down, empty retrieval) — shared fixture reused across eval re-runs, not duplicated |
 | Evals | Cost | Complete | `token_usage`/`mean_token_usage` tracked and reported per `pipeline_mode` |
-| Evals | Latency | Complete | `latency_ms` is now real (fixed this session — was always 0.0 before `started_at` was added), reported per `pipeline_mode` |
+| Evals | Latency | Complete | `latency_ms` is real (driven off `started_at`), reported per `pipeline_mode` |
 
-**Bottom line:** Evals (all 4 sub-items) and the underlying System Design
-architecture are the strongest-covered areas — genuinely complete, not just
-claimed complete. The two real, *code-level* gaps are **PII handling** and
-**Guardrails** — both explicitly named rubric items, both currently
-non-functional stubs rather than just "undocumented." Problem Definition and
-the Trade-offs write-up are informationally covered but not yet consolidated
-into the actual docs deliverable (#8). Given PII/Guardrails are named rubric
-items with zero real implementation today (not a docs gap, a code gap), it's
-worth deciding whether to give them a minimal real implementation before
-docs/video, rather than only writing about intentions that were never built.
+**Bottom line:** Evals (all 4 sub-items), System Design architecture, and
+Data Processing (Sources, Handling PII, Guardrails) are all genuinely
+complete — real code, not stubs, verified end-to-end. Trade Offs remains the
+one gap: real reasoning exists throughout the Decisions log below, but it
+hasn't been consolidated into an actual "Trade-offs" section — that
+consolidation now lives in `docs/documentation.md` §4.
 
-## Core pipeline (CLAUDE.md priority order)
+## Core pipeline
 
 | # | Item | Status | Note |
 |---|---|---|---|
 | — | Docker (Postgres, Qdrant, Redis) | Complete | all 3 containers confirmed running |
-| — | `app/schemas.py` | Complete | extended this session: `RetrievedChunk`, `ResearchPlan`, `agent_errors`, `llm_calls`, quote/resolution fields |
+| — | `app/schemas.py` | Complete | includes `RetrievedChunk`, `ResearchPlan`, `agent_errors`, `llm_calls`, quote/resolution fields |
 | — | LangGraph skeleton (`app/graph.py`) | Complete | shape + `pipeline_mode` routing verified for all 3 modes |
 | — | Ingestion (`ingest/`) | Complete | ran; fixed a Windows cp1252 encoding bug and a `qdrant-client` API change along the way |
 | 1a | Custom AST dependency-graph MCP server | Complete | `mcp_servers/ast_server.py` + `mcp_clients/ast_client.py`; 14/14 tests passing |
-| 1b | Filesystem MCP server | **Superseded** | needs Node.js, still not installed on this machine (re-verified 2026-09-27) — but this row is no longer just "paused waiting to resume": the underlying goal (real code text, not just AST structure) is now met by the GitHub MCP integration instead (see Housekeeping row below + Decisions log's "Reviving GitHub MCP" entry). Not expected to get built unless the target app ever lacks a real hosted repo again |
+| 1b | Filesystem MCP server | **Superseded** | needs Node.js, still not installed on this machine — but this row is no longer just "paused waiting to resume": the underlying goal (real code text, not just AST structure) is now met by the GitHub MCP integration instead (see Housekeeping row below + Decisions log's "Reviving GitHub MCP" entry). Not expected to get built unless the target app ever lacks a real hosted repo again |
 | 2 | Real `research`/`retriever` logic | Complete | `app/retrieval.py` + `rag/search.py`; baseline now actually retrieves (was a strawman before) |
 | 3 | Real `evidence`/`critic` logic | Complete | `agents/evidence.py` + `agents/critic.py`; grounding checked in code, not trusted; flags are sticky across retries |
 | 4 | Postgres `investigations` audit trail | Complete | `memory/db.py`; idempotent `CREATE TABLE IF NOT EXISTS`, one row per completed investigation, written from `memory_write`. Never raises — a dead Postgres degrades to a printed warning, not a crash. Verified against the real local container, not mocked (per CLAUDE.md) |
@@ -55,7 +52,7 @@ docs/video, rather than only writing about intentions that were never built.
 | 7 | Streamlit UI | Complete (V1) | `ui/streamlit_app.py`; verified end-to-end in the browser (real question -> real escalation -> real citations rendered). Only imports `app.graph`/`app.schemas` — no direct dependency on `agents/`/`rag/`/`mcp_clients/`, same boundary `evals/run_eval.py` uses. V2 fast-follow (not built): pipeline_mode selector, critique-flag display, retrieval/agent-error display, cost/latency footer — deliberately deferred per user's "start simple" steer |
 | 8 | Docs (4–5 pages) | Pending | blocked on #6 for the actual numbers; PII statement + Trade-offs section are "never cut" |
 | 9 | Demo video (3 min) | Pending | blocked on #6 and #7 |
-| 10 | `FAILURES.md` | Ongoing | actively maintained, 19 entries so far (stale "12" count fixed 2026-09-27) |
+| 10 | `FAILURES.md` | Ongoing | actively maintained, 20 entries so far (numbered 1–21; #10 was retired at some point and never reused) |
 
 ## Housekeeping
 
@@ -63,16 +60,16 @@ docs/video, rather than only writing about intentions that were never built.
 |---|---|---|
 | Full reorg (`guardrails/`, `agents/`, `rag/`, `mcp_clients/`, `memory/`, `llm_as_judge/`, `evals/`) | Complete | all test suites re-verified passing after the move |
 | `orderflow-app/` moved to `app/` layout | Complete | matches CLAUDE.md's expected path |
-| git — `orderflow-app/` | Complete | you've committed this to its own GitHub repo |
-| git — `ai-capstone/` (the rest: `app/`, `agents/`, `ingest/`, etc.) | Paused | no repo initialized yet; you're managing commits manually |
-| `llm_as_judge/` real implementation | Complete | stale note fixed 2026-09-27 — this was marked TODO from before #6 was built, but `llm_as_judge/judge.py` has been real and in active use since the eval harness was built, including the two re-runs this session |
-| "One command to run everything" script (`run.ps1` or a README section) | TODO (later) | `docker-compose up -d` + `python -m streamlit run ui/streamlit_app.py`. Decided NOT to dockerize the UI/app tier (discussed in chat 2026-09-27): app code changes too often during active development to be worth containerizing, isn't in CLAUDE.md's scope, and none of Postgres/Redis/docs/video is done yet. This script gets the same one-command convenience without any of that cost — revisit once the core build is further along |
+| git — `orderflow-app/` | Complete | committed to its own GitHub repo |
+| git — `app-mind/` (the rest: `app/`, `agents/`, `ingest/`, etc.) | Complete | initialized and committed to its own GitHub repo |
+| `llm_as_judge/` real implementation | Complete | `llm_as_judge/judge.py` is real and in active use by the eval harness, including its re-runs |
+| "One command to run everything" script (`run.ps1` or a README section) | TODO (later) | `docker-compose up -d` + `python -m streamlit run ui/streamlit_app.py`. Decided NOT to dockerize the UI/app tier: app code changes too often during active development to be worth containerizing, isn't in CLAUDE.md's scope, and none of Postgres/Redis/docs/video is done yet. This script gets the same one-command convenience without any of that cost — revisit once the core build is further along |
 | GitHub MCP code-read integration (`mcp_clients/github_client.py`) | Complete | Remote hosted server + scoped read-only PAT, wired into `app/retrieval.py` for `incident_rca` questions only. Verified end-to-end through the real graph for the actual INC-1001 demo question: `critic_on` cites real `payment_client.py` text (grounded=True), including the literal "no idempotency key sent to the gateway" line — the concrete payoff this was built for. 11/11 checks passing in `mcp_clients/test_github_client.py` against the real remote server. No changes needed to `agents/evidence.py`'s grounding CODE — `is_grounded()` was already source-agnostic; only added one line to its LLM instructions about quoting raw source code. See Decisions log for two real gotchas found along the way |
 | Local Docker GitHub MCP server (`ghcr.io/github/github-mcp-server`) | **Deferred, explore later** | User wants to explore this path later (self-hosted, `--read-only`/`GITHUB_TOOLSETS` server-level tool restriction, no dependency on GitHub's remote endpoint) as a follow-up/comparison once the remote path is working — not abandoned, just sequenced after |
 
 ## Decisions log
 
-### 2026-09-27 — Build order: eval harness (#6) before Postgres (#4) / Redis (#5)
+### Build order: eval harness (#6) before Postgres (#4) / Redis (#5)
 CLAUDE.md's numbered list happens to put the Postgres audit trail before the
 eval harness, but that's just the order it was written down in, not a real
 dependency — the eval harness computes every required metric (false-confidence
@@ -90,7 +87,7 @@ reordering carries little risk.
 
 Agreed with the user in chat; not a silent deviation.
 
-### 2026-09-27 — Eval framework: direct SDK calls, not promptfoo/ragas/deepeval/LangSmith
+### Eval framework: direct SDK calls, not promptfoo/ragas/deepeval/LangSmith
 Compared all four against a custom harness. Rejected because each is built
 around a generic metric shape (prompt-in/output-out, RAG faithfulness,
 pytest-style hallucination scoring) while this project's actual deliverable
@@ -98,13 +95,13 @@ is bespoke metrics CLAUDE.md itself defines: false-confidence rate, error-
 catch rate against 4 named planted traps, and a deterministic AST-verified
 check for Impact Analysis — none of which map onto a framework's built-in
 assertions. Would've meant writing the same custom judge logic anyway, wrapped
-in a new dependency (and for LangSmith, a new account/API key) this close to
-a deadline. `agents/evidence.py`/`agents/critic.py` already establish the
+in a new dependency (and for LangSmith, a new account/API key) for no real
+gain. `agents/evidence.py`/`agents/critic.py` already establish the
 exact pattern needed (`structured_call` + a Pydantic schema) — the judge in
 `llm_as_judge/` is just one more instance of that, zero new plumbing.
 Matches CLAUDE.md's stated stack ("direct Anthropic/OpenAI SDK calls").
 
-### 2026-09-27 — Minimum LLM calls: 1 trial per (question, mode), not 3; 9 questions, not 11
+### Minimum LLM calls: 1 trial per (question, mode), not 3; 9 questions, not 11
 Originally proposed 3 trials for the 3 demo questions (to get a stable rate
 given the variance FAILURES.md #11 found) and 1 for backing questions: 51
 total runs across 11 questions. User asked to minimize LLM calls for this
@@ -117,7 +114,7 @@ variance the way 3 trials would; stated plainly where it showed up (see next
 entry), not averaged away — add trials later via `--trials N` if more
 coverage is needed.
 
-### 2026-09-27 — Eval harness built and run; headline numbers (1 trial, treat as directional)
+### Eval harness built and run; headline numbers (1 trial, treat as directional)
 `agents/synthesis.py` (Step 0 — was still the original answer-stub, blocked
 every content-reading metric below), `llm_as_judge/judge.py`, `evals/dataset.py`
 (9 questions: D1-D3 + B1-B6), `evals/run_eval.py`. Full run: 27 graph runs +
@@ -139,7 +136,7 @@ now a number from 27 runs, not the single anecdote in FAILURES.md #11.
 
 **Caveats to carry into the docs, not smooth over:**
 - 1 trial per question — these numbers are directional, not final. Re-run
-  with `--trials N` before they go in the submission if time allows.
+  with `--trials N` for a sturdier headline figure.
 - D1 (the doc-vs-doc contradiction) triggered false confidence in **all
   three modes**, including critic_on, in this run — same variance pattern as
   FAILURES.md #11, not a new bug.
@@ -160,7 +157,7 @@ now a number from 27 runs, not the single anecdote in FAILURES.md #11.
   against the answer TEXT rather than that field. Noted, not fixed — low
   priority, doesn't block anything.
 
-### 2026-09-27 — Postgres/Redis wiring: external cache wrapper, raw psycopg, 24h TTL
+### Postgres/Redis wiring: external cache wrapper, raw psycopg, 24h TTL
 Three design forks, decided with the user before building:
 1. **Cache lookup as an external wrapper (`app/investigate.py`), not a new graph
    node.** `app/graph.py`'s shape is already verified end-to-end for all 3
@@ -199,7 +196,7 @@ install*, not `.venv`. It rendered the app fine (global env happened to have
 the same packages) but its writes were going somewhere unverifiable — see
 FAILURES.md #16.
 
-### 2026-09-27 — Reviving GitHub MCP for real code reads (revises CLAUDE.md's "not GitHub" call)
+### Reviving GitHub MCP for real code reads (revises CLAUDE.md's "not GitHub" call)
 CLAUDE.md's architecture section explicitly says the existing MCP server is
 "the official Filesystem MCP server (**not GitHub** — there's no real hosted
 repo)." That was true when CLAUDE.md was written. It no longer is:
@@ -216,7 +213,7 @@ now-real hosted repo instead of local disk, and needs no Node.js at all
 (the official GitHub MCP server is written in Go, not TypeScript).
 
 **Remote hosted server + scoped read-only PAT, not local Docker,** chosen for:
-- Zero new infrastructure before the deadline — no container to pull/manage,
+- Zero new infrastructure to stand up — no container to pull/manage,
   no subprocess-spawn latency on top of the network call GitHub makes anyway.
 - The safety property local Docker's `--read-only` flag would give (write
   tools unusable) is achievable identically via PAT scoping: a fine-grained
@@ -237,15 +234,15 @@ sequenced after** — user wants to explore it later for the stronger
 server-level tool restriction (`--read-only`, `GITHUB_TOOLSETS`) once the
 remote path is proven working.
 
-**Not yet built:** the PAT (user generating it, steps given in chat, never
-pasted into this session), `mcp_clients/github_client.py` (mirrors
+**Scope at the time of this decision:** the PAT (user-generated, kept out of
+chat/session text), `mcp_clients/github_client.py` (mirrors
 `ast_client.py`'s shape, HTTP transport instead of stdio), where it plugs
 into `app/retrieval.py`, and how a code-read result changes
-`agents/evidence.py`'s grounding check. Trigger question type, most likely
-`incident_rca` (INC-1001's real bug is the payoff case) — not yet decided
-whether `impact_analysis` also gets it.
+`agents/evidence.py`'s grounding check. Trigger question type: `incident_rca`
+(INC-1001's real bug is the payoff case) — `impact_analysis` deliberately
+does not use it (see Core pipeline table for final build status).
 
-### 2026-09-27 — GitHub MCP integration built and verified (real code citations for INC-1001)
+### GitHub MCP integration built and verified (real code citations for INC-1001)
 Built per the plan in the entry above: `mcp_clients/github_client.py` (new,
 connects to `https://api.githubcopilot.com/mcp/` over streamable HTTP),
 `mcp_clients/ast_client.py` extended (`ASTLookupResult.file_paths`, so
@@ -257,10 +254,10 @@ ground-truth check; adding a live GitHub call there would add cost/latency/a
 new failure mode for no metric benefit).
 
 **Real cost measured, not estimated:** the INC-1001 demo question through
-`critic_on` took ~23s (vs ~9-16s for other critic_on runs earlier this
-session) — each retry now makes both an AST call AND a GitHub call, and this
-question triggered 2 retries. Worth a line in the docs' cost/latency
-discussion, not just the RAG-vs-agentic trade-off already planned.
+`critic_on` took ~23s (vs ~9-16s for other critic_on runs) — each retry now
+makes both an AST call AND a GitHub call, and this question triggered 2
+retries. Worth a line in the docs' cost/latency discussion, not just the
+RAG-vs-agentic trade-off already planned.
 
 **Two real bugs found and fixed while wiring this up, not anticipated in the
 plan** — see FAILURES.md #17 and #18 for full detail:
@@ -286,7 +283,7 @@ two questions FAILURES.md/evals/dataset.py flagged as unverifiable against
 real code) actually improve now that this exists. Worth doing before it goes
 in the docs' eval tables.
 
-### 2026-09-27 — Eval re-run with GitHub MCP active: confirmed working, and a real variance finding
+### Eval re-run with GitHub MCP active: confirmed working, and a real variance finding
 Full 27-run + 4-error-case re-run after the GitHub MCP integration. Confirmed
 working as intended: D2/B1/B6 (`incident_rca`) now show `+ GitHub source
 read` in retrieval logs and cite `app/payment_client.py`/`app/inventory_client.py`
@@ -340,7 +337,7 @@ case), for a reason that has nothing to do with real system health. Caught
 by testing the exact B2 question before running the full 27-run eval, not
 after. See FAILURES.md #19.
 
-### 2026-09-27 — PII/Guardrails: real implementation, kept deliberately minimal
+### PII/Guardrails: real implementation, kept deliberately minimal
 Both guardrails were literal no-op stubs (confirmed by rereading them fresh,
 plus grepping the whole codebase for "PII" — the only hit was a docstring
 comment citing this exact rubric line, no actual logic). Fixed with the
@@ -376,7 +373,7 @@ question (zero false positives), a live PII-containing question blocked
 before any retrieval/LLM work (`llm_calls=0`, `token_usage=0`), full 3-mode
 graph smoke test still passing, no regressions in any existing test suite.
 
-### 2026-09-27 — `orderflow-app/` was missing entirely after the repo migration; restored
+### `orderflow-app/` was missing entirely after the repo migration; restored
 Found while regression-testing the guardrails change (unrelated to it):
 `mcp_servers.test_ast_server` failed with `AST root does not exist`. The new
 `app-mind` repo had no `orderflow-app/` folder anywhere — not merged into
@@ -384,7 +381,7 @@ Found while regression-testing the guardrails change (unrelated to it):
 entirely (`list_components`/`get_dependents`/`get_callers` couldn't even
 start), which silently broke two things: Impact Analysis questions
 (D3/B4), and Incident RCA's GitHub code-read (which depends on AST
-resolving a file path first — see the 2026-09-27 GitHub MCP entries above).
+resolving a file path first — see the GitHub MCP entries above).
 
 **Discussed before fixing, not assumed:** the user asked why a local copy
 was needed at all, given the stated principle that code access should go
@@ -398,7 +395,7 @@ oversight), and matches how real static-analysis tools work (clone, then
 analyze locally, same reason CodeQL/SonarQube do it that way). Making the
 AST server itself fully GitHub-MCP-native (fetch every file via
 `get_file_contents` before parsing) is legitimate future work, not
-something to build under this deadline — treated the same as the other
+something to build now — treated the same as the other
 explicitly-deferred items below.
 
 **Fix:** user copied `orderflow-app/` from the old `ai-capstone/` checkout
@@ -407,16 +404,15 @@ matches CLAUDE.md's expected `orderflow-app/app/` layout exactly. Re-ran the
 full regression after: AST server 14/14 again, both the impact_analysis and
 incident_rca-via-GitHub chains confirmed working end-to-end, zero errors.
 
-## Explicitly deferred to after submission (per CLAUDE.md — do not build)
+## Explicitly deferred (do not build now)
 
 Reranker, HyDE, query-rewrite-as-a-step, ANN algorithm comparison, semantic
 memory reuse, richer guardrails, a second vector DB, a standalone
 LLM-as-judge lab exercise (separate from the in-project judge above).
 
 **LangSmith evals** — the eval harness (#6) uses direct SDK calls, not a
-framework (see Decisions log below for the comparison against promptfoo/
+framework (see Decisions log above for the comparison against promptfoo/
 ragas/deepeval/LangSmith). User wants to explore LangSmith evals specifically
-as a personal learning exercise after this project is submitted, since
-langgraph is already the runtime here and tracing would be near-free to add —
-a good comparison point against the custom harness once there's no deadline
-pressure.
+as a personal learning exercise later, since langgraph is already the
+runtime here and tracing would be near-free to add — a good comparison
+point against the custom harness.

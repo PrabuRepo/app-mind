@@ -8,6 +8,30 @@ Full documentation: [`docs/documentation.md`](docs/documentation.md) (problem st
 
 ---
 
+## Components
+
+One line each, linking to the folder:
+
+| Folder | What's in it |
+|---|---|
+| [`app/`](app/) | Core: Pydantic schemas, the LangGraph pipeline (`graph.py`), the retrieval coordinator, the LLM call wrapper, and the cache-aware entry point real callers use. |
+| [`agents/`](agents/) | The Evidence agent (extracts and mechanically grounds cited claims) and the Critic agent (flags contradictions, uncited claims, and gaps) — the two LLM-driven reasoning steps the comparative eval is built around. |
+| [`guardrails/`](guardrails/) | Input guardrail (blocks PII-looking questions before any cost is incurred) and output guardrail (blocks an uncited answer from shipping). |
+| [`rag/`](rag/) | Embeds a question and searches Qdrant's `docs`/`incidents` collections — the RAG half of retrieval. |
+| [`mcp_servers/`](mcp_servers/) | The custom AST dependency-graph MCP server — a local, offline static analysis of OrderFlow exposing `list_components`/`get_dependents`/`get_callers`. |
+| [`mcp_clients/`](mcp_clients/) | The two MCP clients: a local stdio client for the AST server, and a remote client for GitHub's hosted MCP server (real source-text citations). |
+| [`memory/`](memory/) | The Postgres audit trail (one row per investigation) and the Redis investigation-lookup cache. |
+| [`ingest/`](ingest/) | Chunks, embeds, and loads the `knowledge-domains/` corpus into Qdrant. |
+| [`knowledge-domains/`](knowledge-domains/) | The RAG corpus itself — OrderFlow's docs and incident reports, each incident planting a different kind of investigative trap. |
+| [`orderflow-app/`](orderflow-app/) | OrderFlow — the synthetic target application AppMind investigates, including its one intentionally planted bug. |
+| [`evals/`](evals/) | The comparative eval harness: the 9-question dataset, the runner, and the results. |
+| [`llm_as_judge/`](llm_as_judge/) | The LLM-as-judge used by the eval harness to score subjective questions. |
+| [`ui/`](ui/) | The Streamlit front end. |
+| [`docs/`](docs/) | Submission documentation: the approved design doc, the full documentation, and both architecture diagrams. |
+| [`setup-files/`](setup-files/) | Earlier setup notes — **stale**, written before the build diverged from the original plan (a different tech stack, different file layout). Use this README instead. |
+
+---
+
 ## Prerequisites
 
 - **Python 3.11+** (built and tested on 3.13)
@@ -35,11 +59,11 @@ pip install -r requirements.txt
 docker compose up -d
 docker compose ps          # all 3 should show "Up"
 
-# 4. Configure secrets
+# 4. Configure secrets (template lives in setup-files/, .env itself goes at the repo root)
 # Windows:
-Copy-Item .env.example .env
+Copy-Item setup-files\.env.example .env
 # macOS/Linux:
-cp .env.example .env
+cp setup-files/.env.example .env
 # then open .env and fill in OPENAI_API_KEY, GITHUB_TOKEN, GITHUB_TARGET_REPO
 
 # 5. Load the knowledge base into Qdrant
@@ -120,29 +144,6 @@ The Streamlit UI (`http://localhost:8501`) always runs in `critic_on` mode — t
 
 **If something looks wrong:** confirm all 3 containers are up (`docker compose ps`), confirm `.env` has real values (not the `.env.example` placeholders), and check the terminal running Streamlit for a printed `[node_name]` trace of what each pipeline step actually did — every node logs as it fires.
 
----
-
-## Components
-
-One line each, linking to the folder:
-
-| Folder | What's in it |
-|---|---|
-| [`app/`](app/) | Core: Pydantic schemas, the LangGraph pipeline (`graph.py`), the retrieval coordinator, the LLM call wrapper, and the cache-aware entry point real callers use. |
-| [`agents/`](agents/) | The Evidence agent (extracts and mechanically grounds cited claims) and the Critic agent (flags contradictions, uncited claims, and gaps) — the two LLM-driven reasoning steps the comparative eval is built around. |
-| [`guardrails/`](guardrails/) | Input guardrail (blocks PII-looking questions before any cost is incurred) and output guardrail (blocks an uncited answer from shipping). |
-| [`rag/`](rag/) | Embeds a question and searches Qdrant's `docs`/`incidents` collections — the RAG half of retrieval. |
-| [`mcp_servers/`](mcp_servers/) | The custom AST dependency-graph MCP server — a local, offline static analysis of OrderFlow exposing `list_components`/`get_dependents`/`get_callers`. |
-| [`mcp_clients/`](mcp_clients/) | The two MCP clients: a local stdio client for the AST server, and a remote client for GitHub's hosted MCP server (real source-text citations). |
-| [`memory/`](memory/) | The Postgres audit trail (one row per investigation) and the Redis investigation-lookup cache. |
-| [`ingest/`](ingest/) | Chunks, embeds, and loads the `knowledge-domains/` corpus into Qdrant. |
-| [`knowledge-domains/`](knowledge-domains/) | The RAG corpus itself — OrderFlow's docs and incident reports, each incident planting a different kind of investigative trap. |
-| [`orderflow-app/`](orderflow-app/) | OrderFlow — the synthetic target application AppMind investigates, including its one intentionally planted bug. |
-| [`evals/`](evals/) | The comparative eval harness: the 9-question dataset, the runner, and the results. |
-| [`llm_as_judge/`](llm_as_judge/) | The LLM-as-judge used by the eval harness to score subjective questions. |
-| [`ui/`](ui/) | The Streamlit front end. |
-| [`docs/`](docs/) | Submission documentation: the approved design doc, the full documentation, and both architecture diagrams. |
-| [`setup-files/`](setup-files/) | Earlier setup notes — **stale**, written before the build diverged from the original plan (a different tech stack, different file layout). Use this README instead. |
 
 ---
 
