@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Bash(cat .env)",
+      "Bash(type .env)",
+      "Bash(Get-Content .env)",
+      "PowerShell(cat .env)",
+      "PowerShell(type .env)",
+      "PowerShell(Get-Content .env)"
+    ],
+    "blockReadsOutsideWorkingDirectories": true,
+    "disableBypassPermissionsMode": "disable"
+  }
+}

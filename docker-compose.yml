@@ -1,0 +1,45 @@
+# Windows 11 note: requires Docker Desktop with the WSL2 backend enabled
+# (the Docker Desktop installer prompts for this). Run `wsl --install` first
+# if you don't already have a Linux distro registered under WSL. Once Docker
+# Desktop is running, every command below and in SETUP.md is identical
+# whether you run it from PowerShell, WSL, macOS, or Linux.
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: appmind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: appmind
+      POSTGRES_PASSWORD: appmind
+      POSTGRES_DB: appmind
+    ports:
+      - "5432:5432"
+    volumes:
+      - appmind_pg_data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: appmind-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - appmind_qdrant_data:/qdrant/storage
+
+  redis:
+    image: redis:7
+    container_name: appmind-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - appmind_redis_data:/data
+
+volumes:
+  appmind_pg_data:
+  appmind_qdrant_data:
+  appmind_redis_data:

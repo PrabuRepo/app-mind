@@ -1,0 +1,19 @@
+# Windows 11 note: if `psycopg[binary]` fails to build/install, swap it for
+# `psycopg2-binary` instead — same functionality, more reliable prebuilt
+# wheels on Windows. Everything else below installs identically on Windows,
+# macOS, and Linux.
+
+langgraph>=0.2.0
+pydantic>=2.7
+qdrant-client>=1.9
+openai>=1.30
+anthropic>=0.34
+fastapi>=0.111
+uvicorn[standard]>=0.30
+streamlit>=1.36
+redis>=5.0
+psycopg[binary]>=3.1
+sqlalchemy>=2.0
+mcp>=1.0
+python-dotenv>=1.0
+tiktoken>=0.7

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m mcp_servers.test_ast_server)",
+      "Bash(.venv/Scripts/python.exe \"C:\\\\Users\\\\prabu\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-prabu-codebase-app-mind\\\\b86aa608-3b7e-4de7-aeaa-66e185ea9c0d\\\\scratchpad\\\\test_github_mcp.py\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)"
+    ]
+  }
+}
