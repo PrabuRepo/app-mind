@@ -149,4 +149,4 @@ The Streamlit UI (`http://localhost:8501`) always runs in `critic_on` mode — t
 
 ## Project status
 
-This is a capstone submission under active development up to the submission deadline. See [`TASKS.md`](TASKS.md) for exactly what's built and verified vs. still pending, and [`FAILURES.md`](FAILURES.md) for every pivot, cut, and bug along the way — logged as they happened, not reconstructed after the fact.
+This is a capstone project under active development. See [`TASKS.md`](TASKS.md) for exactly what's built and verified vs. still pending, and [`FAILURES.md`](FAILURES.md) for every pivot, cut, and bug along the way — logged as they happened, not reconstructed after the fact.
