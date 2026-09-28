@@ -117,13 +117,22 @@ def run_error_handling_cases() -> list[str]:
     check_local("escalation brief explains the retrieval problem",
                "Retrieval problems" in out["decision_brief"].confidence_rationale)
 
-    print("\n== ERROR CASE 4: empty retrieval (off-topic question) ==")
+    print("\n== ERROR CASE 4: off-topic question blocked at input_guardrail ==")
+    # Previously this reached the confidence_gate via empty retrieval (0.0
+    # score -> escalate). The topic-relevance check in input_guardrail now
+    # catches it earlier and cheaper — see guardrails/input_guardrail.py.
+    # The downstream empty-retrieval -> confidence_gate -> escalate path
+    # itself is untouched (route_after_gate wasn't changed); it's still the
+    # fallback for anything the topic check's embedding call fails to run
+    # for, or scores just above threshold but genuinely has no matches.
     out = run_graph("What is the capital of France?", PipelineMode.CRITIC_ON)
-    check_local("nothing retrieved (all below relevance threshold)", not out["retrieved_chunks"],
+    check_local("blocked by the topic-relevance guardrail", out["blocked"])
+    check_local("no retrieval was attempted", not out["retrieved_chunks"],
                str([(c.source, c.score) for c in out["retrieved_chunks"]]))
-    check_local("confidence gate scored 0", out["confidence_score"] == 0.0)
     check_local("escalated to a human",
-               "could not reach sufficient confidence" in out["decision_brief"].answer)
+               "escalate" in out["decision_brief"].answer.lower())
+    check_local("block reason names the real cause",
+               "does not appear to relate to OrderFlow" in out["decision_brief"].confidence_rationale)
 
     return local_failures
 

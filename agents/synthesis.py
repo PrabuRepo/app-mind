@@ -95,6 +95,7 @@ def synthesize_answer(question: str, evidence: list[EvidenceRecord]) -> Synthesi
         SYNTHESIS_INSTRUCTIONS,
         f"QUESTION:\n{question}\n\nEVIDENCE:\n{format_evidence_for_prompt(evidence)}",
         SynthesizedAnswer,
+        caller="synthesis",
     )
     out = SynthesisOutput(tokens=result.tokens, llm_calls=1, error=result.error)
     if result.parsed is None:
@@ -117,6 +118,7 @@ def synthesize_baseline_answer(question: str, chunks: list[RetrievedChunk]) -> S
         BASELINE_INSTRUCTIONS,
         f"QUESTION:\n{question}\n\nSEARCH RESULTS:\n{format_chunks_for_prompt(chunks)}",
         SynthesizedAnswer,
+        caller="synthesis_baseline",
     )
     out = SynthesisOutput(tokens=result.tokens, llm_calls=1, error=result.error)
     if result.parsed is None:

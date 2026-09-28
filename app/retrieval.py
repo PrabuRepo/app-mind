@@ -58,6 +58,12 @@ class RetrievalResult:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     target_component: str | None = None
+    mcp_calls: list[str] = field(default_factory=list)
+    # Which MCP tools were actually invoked this call — appended when the
+    # call is attempted, regardless of whether it then succeeds or fails
+    # (an attempt that errors out is still an invocation). Lets the retriever
+    # node in graph.py report real MCP usage in the trace, not just what the
+    # research plan intended.
 
 
 def _describe_error(exc: BaseException) -> str:
@@ -100,6 +106,7 @@ def _search_code_dependencies(question: str, target_component: str | None, resul
     """Returns the file paths AST resolved the question's component(s) to, so
     the caller can optionally chain a real GitHub source read onto them —
     empty on any failure (nothing to chain)."""
+    result.mcp_calls.append("AST MCP")
     try:
         ast_result = lookup_dependents(question, target_component)
     except Exception as exc:  # includes TimeoutError and a server that won't start
@@ -112,6 +119,7 @@ def _search_code_dependencies(question: str, target_component: str | None, resul
 
 
 def _search_source_code(file_paths: list[str], result: RetrievalResult) -> None:
+    result.mcp_calls.append("GitHub MCP")
     try:
         github_result = fetch_source_files(file_paths)
     except Exception as exc:  # includes TimeoutError, a bad/missing token, network failure

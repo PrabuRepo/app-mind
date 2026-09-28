@@ -49,7 +49,7 @@ That said, the system defends against PII *appearing in a live question* (a real
 
 Both guardrails are real, verified checks — not placeholders:
 
-- **Input guardrail**: three deterministic regex patterns (email, phone, SSN-shaped). A match blocks the question immediately — `blocked=True`, routed straight to an honest escalation brief, **before any retrieval or LLM cost is incurred** (`token_usage=0`, `llm_calls=0`). Off-topic questions are deliberately *not* filtered here: the existing empty-retrieval → `confidence_score=0.0` → escalate path already handles them correctly (verified by a dedicated fault-injection test), so a second, cruder keyword-based off-topic filter would only add false-positive risk for no real gain.
+- **Input guardrail**: two checks, in order. First, three deterministic regex patterns (email, phone, SSN-shaped) — a match blocks the question immediately, `blocked=True`, routed straight to an honest escalation brief, **before any retrieval or LLM cost is incurred** (`token_usage=0`, `llm_calls=0`). Second, a topic-relevance check: the question is embedded and compared via cosine similarity against a fixed reference description of OrderFlow's scope, blocking anything below a threshold (0.18) chosen by measuring real on-topic vs. off-topic questions (see §3's Components details). This *replaced* an earlier design where off-topic questions were deliberately left unfiltered at input, relying only on the downstream empty-retrieval → `confidence_score=0.0` → escalate path — that path still exists as the fallback if the topic-check's own embedding call fails (fail-open, not fail-closed).
 - **Output guardrail**: refuses to let a brief ship with zero citations unless it is honestly an escalation — replacing it with a safe fallback rather than just logging a warning. A confident, uncited answer is exactly the false-confidence failure mode this whole project exists to catch; the guardrail must not let one through even if every upstream node missed it.
 
 ---
@@ -82,14 +82,18 @@ flowchart LR
 
 **Reading it:** a user question (via the UI, or a question from the eval harness) enters the agentic orchestration layer — the LangGraph pipeline of Supervisor, Evidence, Critic, and Synthesis agents. That layer is the hub: it pulls application knowledge from RAG (Qdrant), pulls code knowledge through MCP tools (the custom AST server and GitHub), makes its reasoning calls through the LLM, and persists results to Postgres (audit trail) and Redis (repeat-question cache). Evaluation sits outside this live path entirely — it invokes the same orchestration layer the way a real user would, then scores the result with an LLM-as-Judge.
 
-### Pipeline
+### Components details
+
+Every box in the diagram above, and every piece that sits behind "Agentic Orchestration" — what it is, what it does, and how it actually works.
+
+**Agentic Orchestration (LangGraph)**
+
+What it is: a single **LangGraph** `StateGraph` — not three separate systems for baseline/critic_off/critic_on. How it works: one flag, `pipeline_mode`, decides which nodes execute for a given run, and a retry loop (critic → research, capped at `retry_count < 2`) lets the Critic send a run back for another look when it finds an unresolved gap or contradiction, widening the search on each pass rather than repeating the same narrow query.
 
 ```
 input_guardrail → supervisor → research → retriever → evidence → critic
   → confidence_gate → (escalate | synthesis) → output_guardrail → memory_write
 ```
-
-Built as a single **LangGraph** `StateGraph`, not three separate systems. One flag — `pipeline_mode` — decides which nodes execute for a given run:
 
 | Mode | Path |
 |---|---|
@@ -97,23 +101,96 @@ Built as a single **LangGraph** `StateGraph`, not three separate systems. One fl
 | `critic_off` | full path, critic node skipped |
 | `critic_on` | full path, including the critic — "AppMind proper" |
 
-A retry loop (critic → research, capped at `retry_count < 2`) lets the Critic send a run back for another look when it finds an unresolved gap or contradiction — widening the search on each pass rather than repeating the same narrow query.
+Four pieces of that pipeline do the actual reasoning/decision work:
 
-### Retrieval Design
+- **Supervisor** — *what:* the classification step. *Functionality:* sorts the question into one of the three build-scope types and, for `impact_analysis`/`incident_rca`, guesses a starting code component. *How it works:* a keyword stub today (checks for words like "affect"/"depend"/"charge"), not an LLM call — explicitly not the polished part of this build.
+- **Evidence agent** — *what:* the claim-extraction step. *Functionality:* turns retrieved chunks into structured, cited claims. *How it works:* one LLM call extracts claims with verbatim quotes, then code mechanically checks each quote against the source chunk's real text (`is_grounded()`) — grounding is verified, never trusted from the model.
+- **Critic agent** — *what:* the challenge/review step, and the whole point of the comparative eval. *Functionality:* reviews evidence for contradictions, uncited claims, and gaps. *How it works:* one LLM call with a deliberately generic prompt that never names a specific planted incident, so the eval measures real judgement rather than a critic tuned to the test corpus; flags are sticky across retries (an earlier flag stays unresolved unless the model explicitly says the current evidence resolves it).
+- **Confidence gate** — *what:* the go/no-go decision. *Functionality:* decides whether an investigation is confident enough to answer, or should escalate. *How it works:* a heuristic score (starts at 1.0, penalized per unresolved flag and ungrounded citation, capped at 0.4 on any retrieval/agent error, forced to 0.0 on zero evidence) — below 0.5, or with any unresolved flag, the run escalates instead of answering.
 
-**RAG** (Qdrant) covers `docs` and `incidents` — two collections, not one flat index, so each can have its own top-k policy per question type. **Code is deliberately not in the vector store.** "What depends on X" is a graph-traversal question with one correct answer, not a similarity-search problem — an embedded snapshot of code also goes silently stale the moment the code changes, which is precisely the kind of false confidence this project exists to catch.
+**RAG (Qdrant)**
+
+What it is: vector search over two Qdrant collections, `docs` and `incidents` — not one flat index, so each can have its own top-k policy per question type. Functionality: retrieves the documentation/incident chunks most relevant to a question. How it works: the question is embedded (`text-embedding-3-small`) and compared by cosine similarity, with a relevance cutoff (0.25, measured against this corpus) so an off-topic question yields empty retrieval rather than the least-bad chunks dressed up as evidence. **Code is deliberately not in the vector store** — "what depends on X" is a graph-traversal question with one correct answer, not a similarity-search problem, and an embedded snapshot of code goes silently stale the moment the code changes.
+
+**MCP Tools (Custom AST server + GitHub)**
 
 Two MCP servers cover code, doing genuinely different jobs:
 
-- **Custom AST server** (`mcp_servers/ast_server.py`) — a 4-pass static analysis (definitions → imports → type bindings → call resolution) over the local `orderflow-app/` checkout, exposing `list_components`/`get_dependents`/`get_callers`. Deliberately **offline**: building a cross-file dependency graph needs every file parsed together, not fetched one-at-a-time over a network API — the same reason real static-analysis tools (CodeQL, SonarQube) clone a repo and analyze the checkout rather than call a per-file API during analysis. 14/14 tests passing.
-- **GitHub MCP** (`mcp_clients/github_client.py`) — the remote, official GitHub MCP server (`api.githubcopilot.com/mcp/`, written in Go), fetching one file's real text on demand for citation-grade evidence. Used only for `incident_rca` questions, where quoting the actual bug (not just a structural fact) is the clear payoff — e.g. citing `payment_client.py`'s literal "no idempotency key sent to the gateway" line for INC-1001. 11/11 tests passing against the real remote server.
+- **Custom AST server** (`mcp_servers/ast_server.py`) — what: a local, offline dependency-graph tool. Functionality: exposes `list_components`/`get_dependents`/`get_callers` for Impact Analysis and Incident/RCA questions. How it works: a 4-pass static analysis (definitions → imports → type bindings → call resolution) over the local `orderflow-app/` checkout — deliberately offline, because building a cross-file dependency graph needs every file parsed together, not fetched one-at-a-time over a network API (the same reason real static-analysis tools like CodeQL/SonarQube clone a repo rather than call a per-file API during analysis). 14/14 tests passing.
+- **GitHub MCP** (`mcp_clients/github_client.py`) — what: a remote, official GitHub MCP server client. Functionality: fetches one file's real text on demand for citation-grade evidence. How it works: a streamable-HTTP connection to `api.githubcopilot.com/mcp/` (written in Go), used only for `incident_rca` questions — e.g. citing `payment_client.py`'s literal "no idempotency key sent to the gateway" line for INC-1001. 11/11 tests passing against the real remote server.
 
-### Orchestration
+**LLM (OpenAI)**
 
-- **Supervisor**: classifies the question into one of the three build-scope types and, for `impact_analysis`/`incident_rca`, guesses a starting code component (a keyword stub — explicitly not the polished part of this build).
-- **Evidence agent**: extracts claims with verbatim quotes; each quote is mechanically checked against the source chunk's real text (`is_grounded()`) — grounding is verified in code, never trusted from the model.
-- **Critic agent**: reviews evidence for contradictions, uncited claims, and gaps, using a deliberately generic prompt that never names a specific planted incident — so the eval measures real judgement, not a critic tuned to the test corpus.
-- **Confidence gate**: a heuristic score (starts at 1.0, penalized per unresolved flag and ungrounded citation, capped at 0.4 on any retrieval/agent error, forced to 0.0 on zero evidence) — below 0.5, or with any unresolved flag, the run escalates instead of answering.
+What it is: every real reasoning and embedding call in the system, behind one wrapper (`app/llm.py::structured_call`, plus `rag/search.py::embed_query`). Functionality: chat completions for Evidence/Critic/Synthesis (and the eval's LLM-as-Judge), embeddings for RAG search and the input guardrail's topic-relevance check. How it works: `gpt-5.4-mini` by default (`text-embedding-3-small` for embeddings), swappable via `APPMIND_LLM_MODEL` with no code change; every call is Pydantic-schema-constrained (structured output, not "reply in JSON and hope") and never raises — a failure becomes a recorded error, not a crash.
+
+**Storage (Postgres + Redis)**
+
+- **Postgres** — what: the `investigations` audit trail. Functionality: one row per completed run (question, mode, confidence, tokens, latency, citations). How it works: written by `memory_write` at the end of every run; best-effort — a dead Postgres degrades to a printed warning, never a crash.
+- **Redis** — what: an investigation-lookup cache (`memory/cache.py`). Functionality: lets a repeated question skip re-running the whole pipeline. How it works: keyed on `(normalized question, pipeline_mode)` — mode is part of the key deliberately, so a `critic_on` answer can never be served back for a `baseline` lookup — with a 24h TTL. `evals/run_eval.py` deliberately never goes through this path, so every eval run is measured fresh.
+
+**Evaluation**
+
+What it is: the mandatory comparative harness (`evals/`). Functionality: scores baseline/critic_off/critic_on against each other on the same questions. How it works: invokes the same Agentic Orchestration graph a real user would, from outside the live path, then scores results with an LLM-as-Judge plus a deterministic AST-based check for Impact Analysis — full detail in §5.
+
+### End-to-end flow, from the Streamlit UI
+
+Tracing an actual question through the real code, not a diagram:
+
+**1. UI → entry point.** `ui/streamlit_app.py` submits the question to `investigate(question, PipelineMode.CRITIC_ON)` in `app/investigate.py` — the UI never calls the graph directly, and always runs `critic_on` (no mode selector yet, see §7's Housekeeping notes).
+
+**2. Cache check, before anything else.** `investigate()` checks Redis first (`memory/cache.py`, keyed on normalized question + pipeline mode). A cache hit returns the previous `DecisionBrief` immediately — no graph run, no LLM calls, no cost. A miss builds/reuses the compiled LangGraph and invokes it with a fresh `GraphState`.
+
+**3. The graph itself**, node by node (component category in brackets, using the same vocabulary as the High Level Architecture Diagram above):
+
+- **input_guardrail** *[Guardrail]* — the PII regex check, then the topic-relevance embedding check (see §2's guardrails discussion). Either can short-circuit straight to `escalate` before any real cost is spent.
+- **supervisor** *[Agent — orchestration, no LLM call yet]* — classifies question type and guesses a target component (keyword stub today, not the polished part of this build).
+- **research** *[Orchestration logic]* — decides which Qdrant collections/top-k to use and whether AST/GitHub MCP tools are needed. Pure deterministic planning — no LLM call, no external system touched yet.
+- **retriever** *[RAG + MCP]* — embeds the question and vector-searches `docs`/`incidents` (RAG), and for impact/incident questions also calls the AST MCP server (plus GitHub MCP for `incident_rca`) for real code evidence.
+- **evidence** *[Agent — LLM]* — one LLM call extracts cited claims; each quote is mechanically checked against the source text, never trusted from the model.
+- **critic** *[Agent — LLM]* — one LLM call reviews for contradictions, uncited claims, and gaps. If something is unresolved and `retry_count < 2`, the graph loops back to **research** with a wider search.
+- **confidence_gate** *[Orchestration logic]* — the heuristic score described above. Deterministic, no LLM call.
+- **fork** — confident enough with no open flags routes to **synthesis** *[Agent — LLM]* (one final LLM call writes the answer); otherwise to **escalate** *[Orchestration logic]* (no LLM call, an honest "can't answer").
+- **output_guardrail** *[Guardrail]* — refuses to let an uncited, non-escalation answer ship.
+- **memory_write** *[Storage — Postgres + Redis]* — writes the Postgres audit row, caches the result in Redis for next time, and prints the run's final `[trace]` / `llm_calls` / `token_usage` summary (see FAILURES.md and TASKS.md for the observability work that added this).
+
+Note: **Eval** (the fourth category in the architecture diagram) never appears in this list — evaluation *invokes* this same graph from outside (see the diagram above) rather than being a node within it, so a single UI question never touches the eval harness.
+
+**4. Back to the UI.** `investigate()` returns the `DecisionBrief`; Streamlit stores it in `st.session_state` and renders the answer (as a warning if escalated), a confidence progress bar, an expander explaining *why* it escalated when applicable, affected components (Impact Analysis only), and citations.
+
+For a `critic_on` question that triggers one retry, the real logged trace looks like:
+```
+input_guardrail -> supervisor -> research -> retriever -> evidence -> critic
+  -> research -> retriever -> evidence -> critic
+  -> confidence_gate -> synthesis -> output_guardrail -> memory_write
+```
+
+### Eval Run Flow, from `python -m evals.run_eval`
+
+Same graph as the Streamlit UI flow above, wrapped in an outer loop that runs it many times and scores each result — the differences from the UI flow are called out explicitly below rather than repeated.
+
+**1. Entry point — bypasses the cache entirely.** `evals/run_eval.py`'s `main()` loops over all **[9 dataset questions](../evals/dataset.py)** × **3 pipeline modes** × `--trials` (default 1), calling `run_one()` for each. Unlike the UI, this calls `build_graph().invoke()` **directly** — never through `app/investigate.py` — so there is no Redis cache lookup. Every run is guaranteed fresh; a cache hit here would report near-zero cost/latency and silently erase the exact variance the harness exists to measure.
+
+The 3 pipeline modes, briefly (full detail in Components details above):
+
+| Mode | What it measures |
+|---|---|
+| `baseline` | Plain retrieve-then-answer, no Evidence/Critic/Gate — the RAG-only comparison point |
+| `critic_off` | Full path minus the Critic — isolates what Evidence/grounding alone buys |
+| `critic_on` | Full path including the Critic — "AppMind proper," what the eval is ultimately arguing for |
+
+**2. The graph itself, node by node** — identical to the "End-to-end flow" section above: same `[Guardrail]`/`[Agent]`/`[RAG + MCP]`/`[Orchestration logic]`/`[Storage]` components, same retry loop, same routing by `pipeline_mode`. Nothing about the graph itself changes when it's invoked by the eval harness instead of the UI.
+
+**3. Scoring, right after each run finishes** *(this step doesn't exist in the UI flow — it's eval-only)*:
+- **Impact Analysis questions (D3, B4)** — scored **deterministically**, zero LLM cost: `check_impact_analysis()` calls the AST graph directly (in-process, not the MCP subprocess) and checks whether the answer text actually names the real dependent components.
+- **Every other question** — one `judge_run()` call to the LLM-as-judge (`llm_as_judge/judge.py`), scoring false-confidence, whether the planted issue was caught, and citation accuracy. This judge cost is tracked **separately** from the pipeline's own `token_usage`, so it never inflates the reported per-mode cost.
+
+**4. Record + repeat.** Each run's result (latency, tokens, llm_calls, confidence, escalated, citations, judge verdict) is appended to an in-memory list; the loop moves to the next (question, mode, trial) combination.
+
+**5. Error-handling re-check**, after all graph runs finish (unless `--skip-error-cases`): re-runs the same 4 fault-injection cases from `app/test_research_retriever.py` — reused, not duplicated, so that logic exists in exactly one place.
+
+**6. Aggregate + write results.** `aggregate_by_mode()` averages every metric per pipeline_mode, then writes two files:
+- `evals/results/runs.jsonl` — every individual run, raw, one JSON object per line
+- `evals/results/summary.md` — the aggregated table (mean latency/tokens, false-confidence rate, error-catch rate, citation accuracy, escalation rate, per mode) — this is where the numbers in §5 below come from
 
 ### Framework justification
 

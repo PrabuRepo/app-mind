@@ -270,6 +270,16 @@ class GraphState(BaseModel):
     # Same principle as retrieval_errors: recorded, never raised, and the gate
     # treats any of them as "can't be confident" and escalates.
 
+    # --- Appended to by every node, in execution order ---
+    trace: list[str] = Field(default_factory=list)
+    # One entry per node actually executed, in order — including repeats from
+    # the Critic -> Research retry loop. `memory_write` prints the full list
+    # at the end of every run so a single log line shows the exact path this
+    # question took (e.g. a retry shows up as "research" appearing twice, not
+    # just as a retry_count number). Each node returns `state.trace + [name]`
+    # rather than mutating in place, matching how token_usage/llm_calls
+    # already accumulate through the graph.
+
     # --- Populated at the very end, for the audit trail + eval harness ---
     token_usage: int = 0
     # Chat-model tokens (input + output) summed over every LLM call so far.

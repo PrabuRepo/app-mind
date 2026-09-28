@@ -21,9 +21,9 @@ from ingest.run_ingestion import EMBEDDING_MODEL, load_env_and_clients
 # Chunks scoring below this cosine similarity are dropped as irrelevant, so an
 # off-topic question yields an EMPTY retrieval (which the confidence gate
 # escalates) rather than the "least bad" chunks dressed up as evidence.
-# Chosen from measured scores (text-embedding-3-small, this corpus,
-# 2026-09-27): off-topic questions peak at ~0.17, a vague on-topic one at
-# ~0.31, real questions >= 0.57.
+# Chosen from measured scores (text-embedding-3-small, this corpus):
+# off-topic questions peak at ~0.17, a vague on-topic one at ~0.31, real
+# questions >= 0.57.
 MIN_SCORE = 0.25
 
 # Base chunks-per-collection by question type; each retry adds RETRY_EXTRA_TOP_K
@@ -42,9 +42,19 @@ def _get_clients():
     return load_env_and_clients()
 
 
-def embed_query(text: str) -> list[float]:
-    """Embed a single query string with the same model used at ingestion time."""
+def embed_query(text: str, caller: str = "retrieval") -> list[float]:
+    """Embed a single query string with the same model used at ingestion time.
+
+    This IS a real OpenAI API call (just an embedding, not a chat completion)
+    — it fires for every question that reaches retrieval, even one that ends
+    up with zero relevant chunks. Logged separately from `[llm]` in
+    app/llm.py so the two costs aren't confused with each other. `caller`
+    labels WHICH embedding call this is (e.g. "retrieval" vs.
+    "input_guardrail_topic_check") — two different call sites embed the same
+    question text for two different reasons; see guardrails/input_guardrail.py.
+    """
     openai_client, _ = _get_clients()
+    print(f"[llm] embedding ({caller}): calling {EMBEDDING_MODEL}")
     return openai_client.embeddings.create(model=EMBEDDING_MODEL, input=[text]).data[0].embedding
 
 

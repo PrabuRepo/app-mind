@@ -129,5 +129,5 @@ def judge_run(ground_truth: "GroundTruth", outcome: RunOutcome) -> JudgeResult:
         f"confidence_score={outcome.confidence_score:.2f}):\n{outcome.answer}\n\n"
         f"CITATIONS USED:\n{_format_citations(outcome.citations)}"
     )
-    result = structured_call(JUDGE_INSTRUCTIONS, prompt, JudgeVerdict)
+    result = structured_call(JUDGE_INSTRUCTIONS, prompt, JudgeVerdict, caller="judge")
     return JudgeResult(verdict=result.parsed, tokens=result.tokens, error=result.error)

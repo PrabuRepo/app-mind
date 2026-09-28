@@ -17,6 +17,7 @@ from app.schemas import DecisionBrief, GraphState
 
 
 def output_guardrail(state: GraphState) -> dict:
+    trace = state.trace + ["output_guardrail"]
     brief = state.decision_brief
     if brief and not brief.citations and "escalate" not in brief.answer.lower():
         print("[output_guardrail] BLOCKED: brief had zero citations — replacing with an honest escalation")
@@ -28,6 +29,6 @@ def output_guardrail(state: GraphState) -> dict:
                 "(zero citations, not an escalation)."
             ),
         )
-        return {"decision_brief": safe_brief}
+        return {"decision_brief": safe_brief, "trace": trace}
     print("[output_guardrail] passed")
-    return {}
+    return {"trace": trace}

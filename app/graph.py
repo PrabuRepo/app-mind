@@ -86,7 +86,11 @@ def supervisor(state: GraphState) -> dict:
         target_component = None
 
     print(f"[supervisor] classified as: {question_type}")
-    return {"question_type": question_type, "target_component": target_component}
+    return {
+        "question_type": question_type,
+        "target_component": target_component,
+        "trace": state.trace + ["supervisor"],
+    }
 
 
 def research(state: GraphState) -> dict:
@@ -103,7 +107,8 @@ def research(state: GraphState) -> dict:
     """
     plan = make_plan(state.question_type, state.retry_count)
     print(f"[research] {plan.rationale}")
-    return {"research_plan": plan}
+    step = f"research (retry {state.retry_count})" if state.retry_count else "research"
+    return {"research_plan": plan, "trace": state.trace + [step]}
 
 
 def retriever(state: GraphState) -> dict:
@@ -125,10 +130,19 @@ def retriever(state: GraphState) -> dict:
     print(f"[retriever] {len(result.chunks)} chunk(s) {by_collection}, {len(result.errors)} error(s)")
     for err in result.errors:
         print(f"[retriever] WARNING: {err}")
+    mcp_slugs = []
+    for mcp_call in result.mcp_calls:
+        print(f"[mcp] {mcp_call} invoked")
+        mcp_slugs.append(f"mcp:{mcp_call.split()[0].lower()}")   # "AST MCP" -> "mcp:ast"
+    # "llm:embedding" is unconditional: _search_vector_collections() calls
+    # embed_query() as the very first thing retrieve() does, every time,
+    # regardless of question type or whether the search that follows it
+    # succeeds — see app/retrieval.py.
     return {
         "retrieved_chunks": result.chunks,
         "retrieval_errors": result.errors,
         "target_component": result.target_component,
+        "trace": state.trace + ["retriever", "llm:embedding"] + mcp_slugs,
     }
 
 
@@ -148,11 +162,16 @@ def evidence(state: GraphState) -> dict:
     ungrounded = sum(1 for r in result.items if not r.grounded)
     print(f"[evidence] {len(result.items)} claim(s), {ungrounded} ungrounded"
           + (f", ERROR: {result.error}" if result.error else ""))
+    # No "llm:evidence" trace entry when llm_calls==0 — extract_evidence()
+    # short-circuits with zero chunks (see agents/evidence.py) without ever
+    # calling the LLM, and the trace should reflect what actually ran.
+    trace_step = ["evidence", "llm:evidence"] if result.llm_calls else ["evidence"]
     return {
         "evidence": result.items,
         "agent_errors": [f"evidence: {result.error}"] if result.error else [],
         "token_usage": state.token_usage + result.tokens,
         "llm_calls": state.llm_calls + result.llm_calls,
+        "trace": state.trace + trace_step,
     }
 
 
@@ -177,10 +196,14 @@ def critic(state: GraphState) -> dict:
         status = "resolved" if flag.resolved else "OPEN"
         print(f"[critic] FLAG {status} ({flag.flag_type.value}): {flag.description}")
     print(f"[critic] {len(result.items)} flag(s)" + (f", ERROR: {result.error}" if result.error else ""))
+    # Same reasoning as evidence's trace_step: review_evidence() short-circuits
+    # with zero evidence, no LLM call made — see agents/critic.py.
+    trace_step = ["critic", "llm:critic"] if result.llm_calls else ["critic"]
     update = {
         "critique_flags": result.items,
         "token_usage": state.token_usage + result.tokens,
         "llm_calls": state.llm_calls + result.llm_calls,
+        "trace": state.trace + trace_step,
     }
     if result.error:
         update["agent_errors"] = state.agent_errors + [f"critic: {result.error}"]
@@ -219,7 +242,7 @@ def confidence_gate(state: GraphState) -> dict:
         score = 0.0
     print(f"[confidence_gate] score={score:.2f}, unresolved_flags={len(unresolved)}, "
           f"evidence={len(state.evidence)}")
-    return {"confidence_score": score}
+    return {"confidence_score": score, "trace": state.trace + ["confidence_gate"]}
 
 
 def escalate(state: GraphState) -> dict:
@@ -234,6 +257,7 @@ def escalate(state: GraphState) -> dict:
     (looks like it contains PII) — same "honest brief instead of proceeding"
     shape, just a different reason and no evidence to reference.
     """
+    trace = state.trace + ["escalate"]
     if state.blocked:
         print(f"[escalate] input blocked: {state.block_reason}")
         brief = DecisionBrief(
@@ -244,7 +268,7 @@ def escalate(state: GraphState) -> dict:
             citations=[],
             confidence_rationale=f"Blocked before investigation began: {state.block_reason}.",
         )
-        return {"decision_brief": brief}
+        return {"decision_brief": brief, "trace": trace}
 
     print("[escalate] confidence too low or unresolved flags remain — escalating to human")
     brief = DecisionBrief(
@@ -260,7 +284,7 @@ def escalate(state: GraphState) -> dict:
             + (f" Agent problems: {'; '.join(state.agent_errors)}" if state.agent_errors else "")
         ),
     )
-    return {"decision_brief": brief}
+    return {"decision_brief": brief, "trace": trace}
 
 
 def synthesis(state: GraphState) -> dict:
@@ -277,12 +301,18 @@ def synthesis(state: GraphState) -> dict:
     """
     if state.evidence:
         result = synthesize_answer(state.question, state.evidence)
+        llm_label = "llm:synthesis"
     else:
         result = synthesize_baseline_answer(state.question, state.retrieved_chunks)
+        llm_label = "llm:synthesis_baseline"
 
+    # No llm: entry when llm_calls==0 — both synthesize_* functions
+    # short-circuit on empty input without calling the LLM (see agents/synthesis.py).
+    trace_step = ["synthesis", llm_label] if result.llm_calls else ["synthesis"]
     update = {
         "token_usage": state.token_usage + result.tokens,
         "llm_calls": state.llm_calls + result.llm_calls,
+        "trace": state.trace + trace_step,
     }
 
     if result.error or not result.answer:

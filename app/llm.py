@@ -53,9 +53,15 @@ class LLMResult(Generic[T]):
 
 
 def structured_call(instructions: str, user_input: str, schema: type[T],
-                    max_output_tokens: int = 3000) -> LLMResult[T]:
-    """One LLM call whose reply is parsed into `schema`. Never raises."""
+                    max_output_tokens: int = 3000, caller: str = "llm") -> LLMResult[T]:
+    """One LLM call whose reply is parsed into `schema`. Never raises.
+
+    `caller` is just a label for the `[llm]` log line below (e.g. "evidence",
+    "critic") — it has no effect on the call itself. Pass it so the log shows
+    WHICH agent triggered a given API call, not just that one happened.
+    """
     model = model_name()
+    print(f"[llm] {caller}: calling {model} ({schema.__name__})")
     try:
         response = _openai().responses.parse(
             model=model,
@@ -66,8 +72,13 @@ def structured_call(instructions: str, user_input: str, schema: type[T],
             timeout=LLM_TIMEOUT_S,
         )
     except Exception as exc:  # network, auth, rate limit, timeout, schema rejection...
-        return LLMResult(error=f"LLM call failed ({model}): {type(exc).__name__}: {str(exc)[:200]}")
+        error = f"LLM call failed ({model}): {type(exc).__name__}: {str(exc)[:200]}"
+        print(f"[llm] {caller}: FAILED — {error}")
+        return LLMResult(error=error)
     tokens = response.usage.total_tokens if response.usage else 0
     if response.output_parsed is None:
-        return LLMResult(tokens=tokens, error=f"LLM ({model}) returned no parseable output (refusal or truncation)")
+        error = f"LLM ({model}) returned no parseable output (refusal or truncation)"
+        print(f"[llm] {caller}: {model} responded with no parseable output, {tokens} tokens")
+        return LLMResult(tokens=tokens, error=error)
+    print(f"[llm] {caller}: {model} responded ok, {tokens} tokens")
     return LLMResult(parsed=response.output_parsed, tokens=tokens)

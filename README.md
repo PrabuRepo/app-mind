@@ -15,7 +15,7 @@ One line each, linking to the folder:
 | Folder | What's in it |
 |---|---|
 | [`app/`](app/) | Core: Pydantic schemas, the LangGraph pipeline (`graph.py`), the retrieval coordinator, the LLM call wrapper, and the cache-aware entry point real callers use. |
-| [`agents/`](agents/) | The Evidence agent (extracts and mechanically grounds cited claims) and the Critic agent (flags contradictions, uncited claims, and gaps) — the two LLM-driven reasoning steps the comparative eval is built around. |
+| [`agents/`](agents/) | The three LLM-driven reasoning agents the comparative eval is built around:<br>- **Evidence** — extracts claims with verbatim quotes, then mechanically verifies each quote against its source text (never trusted from the model).<br>- **Critic** — reviews evidence for contradictions, uncited claims, and gaps with a deliberately generic prompt; the sole difference between `critic_on` and `critic_off` is whether this agent runs.<br>- **Synthesis** — writes the final decision brief, from verified evidence (critic_off/critic_on) or raw retrieved chunks (baseline, unverified). |
 | [`guardrails/`](guardrails/) | Input guardrail (blocks PII-looking questions before any cost is incurred) and output guardrail (blocks an uncited answer from shipping). |
 | [`rag/`](rag/) | Embeds a question and searches Qdrant's `docs`/`incidents` collections — the RAG half of retrieval. |
 | [`mcp_servers/`](mcp_servers/) | The custom AST dependency-graph MCP server — a local, offline static analysis of OrderFlow exposing `list_components`/`get_dependents`/`get_callers`. |

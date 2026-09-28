@@ -171,7 +171,7 @@ def review_evidence(question: str, evidence: list[EvidenceRecord],
     prompt = f"QUESTION:\n{question}\n\nEVIDENCE:\n{format_evidence_for_prompt(evidence)}"
     if pending:
         prompt += f"\n\nPREVIOUS FLAGS:\n{_format_previous(pending)}"
-    result = structured_call(CRITIC_INSTRUCTIONS, prompt, CriticReview)
+    result = structured_call(CRITIC_INSTRUCTIONS, prompt, CriticReview, caller="critic")
     out = AgentOutput(tokens=result.tokens, llm_calls=1, error=result.error)
 
     if result.parsed is None:

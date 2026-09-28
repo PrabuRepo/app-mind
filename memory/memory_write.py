@@ -42,5 +42,8 @@ def memory_write(state: GraphState) -> dict:
     if state.decision_brief is not None:
         set_cached(state.question, state.pipeline_mode, state.decision_brief)
 
-    print(f"[memory_write] pipeline_mode={state.pipeline_mode.value}, latency_ms={latency_ms:.0f}")
-    return {"latency_ms": latency_ms}
+    full_trace = state.trace + ["memory_write"]
+    print(f"[memory_write] pipeline_mode={state.pipeline_mode.value}, latency_ms={latency_ms:.0f}, "
+          f"llm_calls={state.llm_calls}, token_usage={state.token_usage}")
+    print(f"[trace] {' -> '.join(full_trace)}")
+    return {"latency_ms": latency_ms, "trace": full_trace}

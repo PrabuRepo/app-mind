@@ -111,6 +111,7 @@ def extract_evidence(question: str, chunks: list[RetrievedChunk]) -> AgentOutput
         EVIDENCE_INSTRUCTIONS,
         f"QUESTION:\n{question}\n\nSOURCE CHUNKS:\n{format_chunks_for_prompt(chunks)}",
         EvidenceExtraction,
+        caller="evidence",
     )
     out = AgentOutput(tokens=result.tokens, llm_calls=1, error=result.error)
     if result.parsed is None:
