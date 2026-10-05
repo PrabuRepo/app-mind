@@ -63,7 +63,7 @@ consolidation now lives in `docs/documentation.md` §4.
 | git — `orderflow-app/` | Complete | committed to its own GitHub repo |
 | git — `app-mind/` (the rest: `app/`, `agents/`, `ingest/`, etc.) | Complete | initialized and committed to its own GitHub repo |
 | `llm_as_judge/` real implementation | Complete | `llm_as_judge/judge.py` is real and in active use by the eval harness, including its re-runs |
-| "One command to run everything" script (`run.ps1` or a README section) | TODO (later) | `docker-compose up -d` + `python -m streamlit run ui/streamlit_app.py`. Decided NOT to dockerize the UI/app tier: app code changes too often during active development to be worth containerizing, isn't in CLAUDE.md's scope, and none of Postgres/Redis/docs/video is done yet. This script gets the same one-command convenience without any of that cost — revisit once the core build is further along |
+| "One command to run everything" — full containerization (`Dockerfile`, `docker-entrypoint.py`, `app` service in `docker-compose.yml`) | Complete | Reverses the earlier "decided NOT to dockerize the UI/app tier" call below, now that the project is past submission and the earlier reasons (active development churn, not in scope yet) no longer apply. `docker compose up --build -d` boots all 4 containers; the app container auto-ingests into Qdrant on first boot only (checks point counts first, so a restart doesn't silently re-embed). README documents both this path and the original local-venv path side by side. See Decisions log for the auto-ingest design call and two real bugs found while building it |
 | GitHub MCP code-read integration (`mcp_clients/github_client.py`) | Complete | Remote hosted server + scoped read-only PAT, wired into `app/retrieval.py` for `incident_rca` questions only. Verified end-to-end through the real graph for the actual INC-1001 demo question: `critic_on` cites real `payment_client.py` text (grounded=True), including the literal "no idempotency key sent to the gateway" line — the concrete payoff this was built for. 11/11 checks passing in `mcp_clients/test_github_client.py` against the real remote server. No changes needed to `agents/evidence.py`'s grounding CODE — `is_grounded()` was already source-agnostic; only added one line to its LLM instructions about quoting raw source code. See Decisions log for two real gotchas found along the way |
 | Local Docker GitHub MCP server (`ghcr.io/github/github-mcp-server`) | **Deferred, explore later** | User wants to explore this path later (self-hosted, `--read-only`/`GITHUB_TOOLSETS` server-level tool restriction, no dependency on GitHub's remote endpoint) as a follow-up/comparison once the remote path is working — not abandoned, just sequenced after |
 
@@ -403,6 +403,62 @@ explicitly-deferred items below.
 matches CLAUDE.md's expected `orderflow-app/app/` layout exactly. Re-ran the
 full regression after: AST server 14/14 again, both the impact_analysis and
 incident_rca-via-GitHub chains confirmed working end-to-end, zero errors.
+
+### Full containerization: auto-ingest on first boot, not a separate manual step
+Revisits the "One command to run everything" row above, now that the project
+is past submission. User asked specifically for a single `docker` command to
+host the entire service, including dependencies — not just Postgres/Qdrant/
+Redis (already containerized) but the app/UI tier too, which had been
+deliberately left out earlier.
+
+**Design fork, decided before building:** should the knowledge base load
+into Qdrant automatically on first container boot, or stay a separate
+documented command (`docker compose run app python -m ingest.run_ingestion`)?
+Chose **automatic**, reasoning: the user's own framing — "the entire service
+including all the dependencies" — makes the loaded corpus itself a
+dependency the service needs to actually work. A separate manual step means
+a fresh `docker compose up` boots a UI that escalates on literally every
+question until someone remembers to run ingestion — not really "the entire
+service," just the service plus a trap for whoever runs it next (a grader,
+or future-self on a different machine). Avoided the obvious risk (a
+check that silently skips ingestion when it shouldn't) by keeping it cheap
+and conservative: `docker-entrypoint.py` queries Qdrant's `docs`/`incidents`
+collections for point count and only skips ingestion if both are non-empty;
+ingestion itself is already idempotent (upsert by id), so a false negative
+costs a few seconds, not correctness.
+
+**Two real things found while building this, not anticipated in the plan:**
+- `requirements.txt` didn't exist in the working tree at all — deleted at
+  some point during an earlier cleanup pass (git history shows it existed,
+  current tree didn't), meaning the README's own `pip install -r
+  requirements.txt` setup step was silently broken for a fresh clone. Fixed
+  by regenerating it from the actual third-party imports across the
+  codebase (9 packages: langgraph, mcp, openai, psycopg, pydantic,
+  python-dotenv, qdrant-client, redis, streamlit) cross-referenced against
+  the working `.venv`'s exact installed versions — not a raw `pip freeze`,
+  which would have baked in confirmed-unused leftovers (`fastapi`,
+  `sqlalchemy`, `langsmith`) into the Docker image.
+- The app's `[llm]`/`[trace]`/`[mcp]` print-based logging (see the
+  observability work logged implicitly in this file's recent history)
+  didn't show up in `docker logs` at all — Python buffers stdout
+  differently inside a container than in an interactive terminal. Fixed
+  with `ENV PYTHONUNBUFFERED=1` in the `Dockerfile`.
+
+**Verified for real, not just "should work":** removed 3 stale orphaned
+containers from an earlier mismatched compose-project scope, then ran
+`docker compose up --build -d` from a clean slate — confirmed auto-ingestion
+fired (30 chunks loaded) on first boot, confirmed it correctly skipped
+ingestion on a rebuild/restart with data already present, submitted two real
+questions through the containerized UI via the browser (one triggering a
+Critic retry), confirmed real rows landed in the Postgres audit trail and
+Redis cache, and confirmed the full `[trace]`/`[llm]` logging streams live in
+`docker compose logs -f app`.
+
+**Also fixed while in the README, found not sought:** three dead links left
+over from the `docs/` file renames (`documentation.md` → `detailed-design.md`,
+`onepager.md` → `high-level-design.md`, `architecture_high_level.md` no
+longer exists as a separate file) — the Full documentation line and one
+Prerequisites footnote both pointed at files that no longer exist.
 
 ## Explicitly deferred (do not build now)
 

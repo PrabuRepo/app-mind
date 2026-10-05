@@ -4,7 +4,7 @@
 
 AppMind is an agentic, multi-domain investigation system for **one specific application**. It answers a question about that application — a business/functional question, an incident root-cause investigation, or a code-change impact analysis — by gathering evidence from documentation, incident reports, and the application's own source code, then producing an evidence-backed, auditable decision brief. A **Critic/Challenger agent** reviews that evidence for contradictions, uncited claims, and gaps before an answer is allowed to ship; if confidence stays low, AppMind escalates to a human rather than guess. The target application for this build is **OrderFlow**, a synthetic order-processing service purpose-built so the system has real code and real incidents to investigate without needing an external company's data.
 
-Full documentation: [`docs/documentation.md`](docs/documentation.md) (problem statement, architecture, trade-offs, eval results, failure analysis) · [`docs/onepager.md`](docs/onepager.md) (the original approved design doc) · [`docs/architecture_high_level.md`](docs/architecture_high_level.md) and [`docs/detailed-flow-diagram.md`](docs/detailed-flow-diagram.md) (diagrams) · [`TASKS.md`](TASKS.md) (living build status) · [`FAILURES.md`](FAILURES.md) (pivots, cuts, and bugs, logged as they happened).
+Full documentation: [`docs/detailed-design.md`](docs/detailed-design.md) (problem statement, architecture, trade-offs, eval results, failure analysis) · [`docs/problem-definition-data-processing-evaluation.md`](docs/problem-definition-data-processing-evaluation.md) (a focused 3-topic summary) · [`docs/high-level-design.md`](docs/high-level-design.md) (the original approved design doc) · [`docs/detailed-flow-diagram.md`](docs/detailed-flow-diagram.md) (the detailed pipeline diagram) · [`TASKS.md`](TASKS.md) (living build status) · [`FAILURES.md`](FAILURES.md) (pivots, cuts, and bugs, logged as they happened).
 
 ---
 
@@ -27,7 +27,7 @@ One line each, linking to the folder:
 | [`evals/`](evals/) | The comparative eval harness: the 9-question dataset, the runner, and the results. |
 | [`llm_as_judge/`](llm_as_judge/) | The LLM-as-judge used by the eval harness to score subjective questions. |
 | [`ui/`](ui/) | The Streamlit front end. |
-| [`docs/`](docs/) | Submission documentation: the approved design doc, the full documentation, and both architecture diagrams. |
+| [`docs/`](docs/) | Submission documentation: the approved design doc, the full documentation, a focused 3-topic summary, and the detailed pipeline diagram. |
 | [`setup-files/`](setup-files/) | Earlier setup notes — **stale**, written before the build diverged from the original plan (a different tech stack, different file layout). Use this README instead. |
 
 ---
@@ -38,7 +38,7 @@ One line each, linking to the folder:
 - **Docker Desktop** (Postgres, Qdrant, Redis run as containers — see `docker-compose.yml`)
 - **An OpenAI API key** (LLM calls + embeddings)
 - **A GitHub fine-grained personal access token**, scoped to **read-only "Contents"** access on your target repository only — used by the GitHub MCP integration to fetch real source text for incident investigations. Not the same as a classic token; generate it at github.com → Settings → Developer settings → Fine-grained tokens.
-- **Node.js is *not* required.** An earlier plan used the official Filesystem MCP server (which needs Node); that was superseded by the GitHub MCP integration, which needs nothing installed locally (see [`docs/documentation.md`](docs/documentation.md) §4 for why).
+- **Node.js is *not* required.** An earlier plan used the official Filesystem MCP server (which needs Node); that was superseded by the GitHub MCP integration, which needs nothing installed locally (see [`docs/detailed-design.md`](docs/detailed-design.md) §4 for why).
 
 ## Setup
 
@@ -70,7 +70,45 @@ cp setup-files/.env.example .env
 python -m ingest.run_ingestion
 ```
 
-## Running it
+## Running it, fully containerized (one command)
+
+A faster alternative to Setup steps 2, 3, and 5 above — no local Python install, no manual venv, no manual ingestion. Still needs `.env` (Setup step 4), since secrets have to come from somewhere, and `.env` is passed into the container via `env_file:` in `docker-compose.yml` — never baked into the image itself.
+
+**Start everything** — Postgres, Qdrant, Redis, and the app itself. On first boot, the app container automatically loads the knowledge base into Qdrant before starting the UI (checks whether `docs`/`incidents` already have data first, so a restart doesn't silently re-ingest every time):
+```bash
+docker compose up --build -d
+```
+
+**Check it's up:**
+```bash
+docker compose ps          # all 4 should show "Up"
+```
+
+**Test it:** open `http://localhost:8501` — same UI, same behavior as running it locally.
+
+**Watch it work** — every investigation's full `[input_guardrail]`/`[llm]`/`[mcp]`/`[trace]` logging (see `FAILURES.md`/`TASKS.md`'s observability work) streams live:
+```bash
+docker compose logs -f app
+```
+
+**Stop everything**, keeping all data (Postgres audit trail, Qdrant embeddings, Redis cache survive):
+```bash
+docker compose down
+```
+
+**Stop and wipe everything** — a genuinely clean slate; the next `up` re-runs ingestion from scratch:
+```bash
+docker compose down -v
+```
+
+**After changing source code**, rebuild just the app image — the other 3 containers don't need rebuilding:
+```bash
+docker compose up --build -d app
+```
+
+## Running it, locally (no Docker for the app itself)
+
+Needs the `.venv` from Setup steps 2–5 above — use this path if you're actively modifying code (no image rebuild between runs) or want to run individual scripts/test suites directly.
 
 **Streamlit UI** (single question box, cited answer, real-time investigation):
 ```bash
@@ -137,12 +175,12 @@ The Streamlit UI (`http://localhost:8501`) always runs in `critic_on` mode — t
 
 **Look for:** an immediate escalation with no investigation — should return in well under a second. Confirms the PII regex check fires before any retrieval or LLM call runs (`guardrails/input_guardrail.py`).
 
-### Use case 7 — off-topic question (confidence gate, not a crash)
+### Use case 7 — off-topic question (input guardrail's topic-relevance check)
 > *What is the capital of France?*
 
-**Look for:** an honest escalation with zero citations, not a hallucinated answer and not an error page. Confirms empty retrieval correctly drives confidence to 0.0.
+**Look for:** an immediate escalation, well under a second — not a hallucinated answer and not an error page. The question is embedded and compared against a reference description of OrderFlow's scope; below a measured similarity threshold, it's blocked at `input_guardrail` before any retrieval or LLM call (see `docs/detailed-design.md` §3's Components details). This *replaced* an earlier design where off-topic questions were only caught downstream via empty retrieval → confidence 0.0 — that path still exists as a fallback if the topic check's own embedding call fails.
 
-**If something looks wrong:** confirm all 3 containers are up (`docker compose ps`), confirm `.env` has real values (not the `.env.example` placeholders), and check the terminal running Streamlit for a printed `[node_name]` trace of what each pipeline step actually did — every node logs as it fires.
+**If something looks wrong:** confirm all containers are up — `docker compose ps` (4 if running fully containerized, 3 if running the app locally against Dockerized Postgres/Qdrant/Redis) — confirm `.env` has real values (not the `.env.example` placeholders), and check the logs for the `[trace]` line each investigation prints at the end, which shows exactly which nodes ran and which LLM calls fired. Locally, that's the terminal running Streamlit; containerized, it's `docker compose logs -f app`.
 
 
 ---
