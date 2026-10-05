@@ -65,7 +65,7 @@ consolidation now lives in `docs/documentation.md` §4.
 | `llm_as_judge/` real implementation | Complete | `llm_as_judge/judge.py` is real and in active use by the eval harness, including its re-runs |
 | "One command to run everything" — full containerization (`Dockerfile`, `docker-entrypoint.py`, `app` service in `docker-compose.yml`) | Complete | Reverses the earlier "decided NOT to dockerize the UI/app tier" call below, now that the project is past submission and the earlier reasons (active development churn, not in scope yet) no longer apply. `docker compose up --build -d` boots all 4 containers; the app container auto-ingests into Qdrant on first boot only (checks point counts first, so a restart doesn't silently re-embed). README documents both this path and the original local-venv path side by side. See Decisions log for the auto-ingest design call and two real bugs found while building it |
 | GitHub MCP code-read integration (`mcp_clients/github_client.py`) | Complete | Remote hosted server + scoped read-only PAT, wired into `app/retrieval.py` for `incident_rca` questions only. Verified end-to-end through the real graph for the actual INC-1001 demo question: `critic_on` cites real `payment_client.py` text (grounded=True), including the literal "no idempotency key sent to the gateway" line — the concrete payoff this was built for. 11/11 checks passing in `mcp_clients/test_github_client.py` against the real remote server. No changes needed to `agents/evidence.py`'s grounding CODE — `is_grounded()` was already source-agnostic; only added one line to its LLM instructions about quoting raw source code. See Decisions log for two real gotchas found along the way |
-| Local Docker GitHub MCP server (`ghcr.io/github/github-mcp-server`) | **Deferred, explore later** | User wants to explore this path later (self-hosted, `--read-only`/`GITHUB_TOOLSETS` server-level tool restriction, no dependency on GitHub's remote endpoint) as a follow-up/comparison once the remote path is working — not abandoned, just sequenced after |
+| Local Docker GitHub MCP server (`ghcr.io/github/github-mcp-server`) | **Deferred, analysis done** | Remote hosted server stays the default. Researched and documented (setup steps, pros, cons, design call, verification plan) in the Decisions log entry "Local Docker GitHub MCP server: analysis only, remote stays default" — ready to implement whenever it's picked up |
 
 ## Decisions log
 
@@ -459,6 +459,90 @@ over from the `docs/` file renames (`documentation.md` → `detailed-design.md`,
 `onepager.md` → `high-level-design.md`, `architecture_high_level.md` no
 longer exists as a separate file) — the Full documentation line and one
 Prerequisites footnote both pointed at files that no longer exist.
+
+### Local Docker GitHub MCP server: analysis only, remote stays default
+Researched, not built. The remote hosted server (`api.githubcopilot.com/mcp/`
+via `mcp_clients/github_client.py`) remains the only GitHub MCP path in the
+code. This entry records what a local self-hosted version would involve so
+it can be picked up later without redoing the research.
+
+**What it is:** the same official `github/github-mcp-server` software, run
+locally in Docker instead of using GitHub's hosted deployment of it. It is
+not a custom server — the project's only custom MCP server is the AST one.
+
+**Setup steps (as documented by the server's README):**
+1. Image: `ghcr.io/github/github-mcp-server`. Transport is **stdio** (run with
+   `docker run -i`); no stable HTTP mode is documented in the README.
+2. Auth: `GITHUB_PERSONAL_ACCESS_TOKEN` env var — the same fine-grained,
+   read-only "Contents" PAT the remote path already uses.
+3. Restriction, server-side: `GITHUB_READ_ONLY=1` and `GITHUB_TOOLSETS`
+   (e.g. `repos`) or `GITHUB_TOOLS=get_file_contents` for the narrowest
+   possible surface. Exact toolset containing `get_file_contents` should be
+   confirmed when implementing.
+4. Example invocation:
+   ```
+   docker run -i --rm \
+     -e GITHUB_PERSONAL_ACCESS_TOKEN \
+     -e GITHUB_READ_ONLY=1 \
+     -e GITHUB_TOOLSETS=repos \
+     ghcr.io/github/github-mcp-server
+   ```
+   Passing the token as `-e NAME` (no value) makes Docker read it from the
+   spawning process's environment, so it never appears on the command line.
+
+**How it would plug in:** a new `mcp_clients/github_client_local.py` with the
+same interface as `github_client.py`, built like `ast_client.py` (spawn a
+subprocess, speak MCP over stdio — `StdioServerParameters(command="docker",
+args=[...])`). Selected by an env var, `APPMIND_GITHUB_MCP_MODE=remote|local`,
+defaulting to `remote`, following the `APPMIND_LLM_MODEL` precedent in
+`app/llm.py`, so nothing changes for anyone who doesn't opt in. The tool name
+(`get_file_contents`) is the same on both servers. The remote client's
+`mode="legacy"` workaround (FAILURES.md #17) is specific to the HTTP
+transport and most likely not needed over stdio.
+
+**Pros**
+- **Write tools are never exposed, not just rejected.** Today safety is one
+  layer: the read-only PAT makes GitHub reject write calls. Local adds a
+  second: the write tools aren't registered with the client at all.
+  (Whether the remote server offers an equivalent restriction could not be
+  confirmed from the README; its separate remote docs may.)
+- **Version pinning.** The image tag is chosen, so behavior doesn't change
+  under the project. The remote server's behavior already caused one real
+  bug (FAILURES.md #17).
+- **No dependency on `api.githubcopilot.com/mcp/` specifically**, and a
+  useful side-by-side comparison with the remote path.
+
+**Cons**
+- **Not offline.** The local server is a proxy that still calls GitHub's API
+  with the PAT; only the dependency on the hosted MCP endpoint goes away.
+- **Likely slower per lookup.** A `docker run` spawn per call adds startup
+  latency, comparable to the AST server's measured ~0.9s subprocess spawn.
+- **More moving parts:** Docker must be running and the image pulled.
+- **Same PAT, same rate limits, same auth model** — no gain on those fronts.
+
+**Design call: local-dev path only.** Spawning a sibling container from
+inside the containerized `appmind-app` would require mounting the host's
+`/var/run/docker.sock` and installing the Docker CLI in the image. That
+gives the app container root-equivalent control over the host's Docker
+daemon — too high a permanent cost for an exploratory comparison. The
+containerized path keeps using the remote server. If a containerized local
+server is ever wanted, the safer route is running it as its own compose
+service over HTTP; reports on the server's repo suggest a newer `http`
+command exists but that `--read-only` failed to restrict write tools under
+it ([issue #2156](https://github.com/github/github-mcp-server/issues/2156)),
+and that limiting tools in Docker has had problems
+([issue #577](https://github.com/github/github-mcp-server/issues/577)) —
+both unverified here, so treat read-only enforcement as something to test,
+not assume.
+
+**Verification plan when implemented:**
+1. Call `list_tools()` against the local server and assert **no write tools
+   are present** — this is the whole point of choosing it over remote.
+2. Run the INC-1001 demo question through both modes; confirm both return
+   the same real `payment_client.py` text and `grounded=True` citations.
+3. Measure per-lookup latency for both and record it here.
+
+Sources: [github/github-mcp-server README](https://github.com/github/github-mcp-server).
 
 ## Explicitly deferred (do not build now)
 

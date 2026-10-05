@@ -1,10 +1,31 @@
 # AppMind
 
-**Application Knowledge & Decision Intelligence Agent** — an AI capstone project.
+**Multi-agent AI platform that learns a team's applications and answers like an SME across product, engineering, and operations. Proof of concept on one app.** An AI Cohort capstone project (Application Knowledge & Decision Intelligence).
 
-AppMind is an agentic, multi-domain investigation system for **one specific application**. It answers a question about that application — a business/functional question, an incident root-cause investigation, or a code-change impact analysis — by gathering evidence from documentation, incident reports, and the application's own source code, then producing an evidence-backed, auditable decision brief. A **Critic/Challenger agent** reviews that evidence for contradictions, uncited claims, and gaps before an answer is allowed to ship; if confidence stays low, AppMind escalates to a human rather than guess. The target application for this build is **OrderFlow**, a synthetic order-processing service purpose-built so the system has real code and real incidents to investigate without needing an external company's data.
+## Vision
 
-Full documentation: [`docs/detailed-design.md`](docs/detailed-design.md) (problem statement, architecture, trade-offs, eval results, failure analysis) · [`docs/problem-definition-data-processing-evaluation.md`](docs/problem-definition-data-processing-evaluation.md) (a focused 3-topic summary) · [`docs/high-level-design.md`](docs/high-level-design.md) (the original approved design doc) · [`docs/detailed-flow-diagram.md`](docs/detailed-flow-diagram.md) (the detailed pipeline diagram) · [`TASKS.md`](TASKS.md) (living build status) · [`FAILURES.md`](FAILURES.md) (pivots, cuts, and bugs, logged as they happened).
+Teams that own applications and services depend on knowledge scattered across business docs, architecture, source code, runbooks, and incident history, much of it held in the heads of a few experienced people. AppMind's vision is a platform that learns a team's applications and services and answers questions like a subject-matter expert (SME), from a **product**, **developer**, or **operations** perspective, with cited evidence and an honest "escalate to a human" when it isn't sure.
+
+## What this build is
+
+A **proof of concept on one specific application**. AppMind is an agentic, multi-domain investigation system that answers three kinds of question about that application, which roughly map to those perspectives:
+
+- **Business/functional** (product): how does this work?
+- **Incident root-cause** (operations): why did this break?
+- **Code-change impact analysis** (developer): what would a change affect?
+
+It gathers evidence from documentation, incident reports, and the application's own source code, then produces an evidence-backed, auditable decision brief. A **Critic/Challenger agent** reviews that evidence for contradictions, uncited claims, and gaps before an answer is allowed to ship; if confidence stays low, AppMind escalates to a human rather than guess.
+
+The target application for this build is **OrderFlow**, a synthetic order-processing service purpose-built so the system has real code and real incidents to investigate without needing an external company's data. Extending the same pipeline to more applications, and tailoring answers to the asker's role, is the roadmap beyond this proof of concept, not something built today.
+
+**Full documentation:**
+
+- [`docs/detailed-design.md`](docs/detailed-design.md): problem statement, architecture, trade-offs, eval results, failure analysis
+- [`docs/problem-definition-data-processing-evaluation.md`](docs/problem-definition-data-processing-evaluation.md): a focused 3-topic summary
+- [`docs/high-level-design.md`](docs/high-level-design.md): the original approved design doc
+- [`docs/detailed-flow-diagram.md`](docs/detailed-flow-diagram.md): the detailed pipeline diagram
+- [`TASKS.md`](TASKS.md): living build status
+- [`FAILURES.md`](FAILURES.md): pivots, cuts, and bugs, logged as they happened
 
 ---
 
