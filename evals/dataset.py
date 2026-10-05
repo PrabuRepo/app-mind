@@ -17,16 +17,15 @@ scored by llm_as_judge/judge.py — except the two Impact Analysis questions
 own get_dependents() output, checked in code with no LLM at all (see
 evals/run_eval.py).
 
-KNOWN LIMITATION, narrower than it used to be (2026-09-27): D2 (incident_rca)
-now gets real code via the GitHub MCP server (mcp_clients/github_client.py) —
-critic_on cites the actual payment_client.py retry-loop text, grounded. D1
-(business_functional) still cannot be verified against real code: GitHub
-reads only trigger for incident_rca questions (app/retrieval.py's
-QUESTION_TYPES_USING_GITHUB_TOOLS), since that's the type where quoting real
-code is the clear payoff (INC-1001) — see TASKS.md's 2026-09-27 entries for
-why impact_analysis and business_functional were deliberately left out. For
-D1, "correct" still means "appropriately uncertain given the tools this
-system actually has," not omniscient.
+KNOWN LIMITATION, narrower than it used to be: D2 (incident_rca) gets real
+code, read from the code index (code_context/) — critic_on cites the actual
+payment_client.py retry-loop text, grounded. D1 (business_functional) still
+cannot be verified against real code: source text is only attached for
+incident_rca questions (app/retrieval.py's QUESTION_TYPES_READING_SOURCE_FILES),
+since that's the type where quoting real code is the clear payoff (INC-1001) —
+see TASKS.md for why impact_analysis and business_functional were deliberately
+left out. For D1, "correct" still means "appropriately uncertain given the
+tools this system actually has," not omniscient.
 """
 
 from __future__ import annotations

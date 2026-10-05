@@ -1,6 +1,6 @@
 """
-mcp_servers/ast_server.py — the CUSTOM MCP server: exposes the OrderFlow
-dependency/call graph (built in ast_graph.py) as tools an agent can call.
+mcp_servers/ast_server.py — the CUSTOM MCP server: exposes a code snapshot's
+dependency/call graph (code_context/graph.py) as tools an agent can call.
 
 WHAT MCP IS, BRIEFLY:
 MCP (Model Context Protocol) is a standard way for an agent to discover and
@@ -10,13 +10,20 @@ JSON arguments and gets JSON back. The tool implementation is hidden behind
 that interface — the agent doesn't import our code, it just speaks MCP.
 That separation is why a dead server is a real failure mode worth testing.
 
-TOOLS (all read-only — this server can never modify OrderFlow):
+TOOLS (all read-only — this server can never modify the code it describes):
   list_components()                  what names exist (so the agent can pick a valid one)
   get_dependents(component, ...)     blast radius: modules + functions affected by a change
   get_callers(function, ...)         who calls this function/class
 
+WHERE THE GRAPH COMES FROM:
+The graph is built ahead of time by the separate indexer project and stored as
+a snapshot (see indexer/CONTRACT.md). This server only LOADS one, from a JSON
+file the caller passes in — it never parses source code and never needs
+database credentials. That file is exported from the database by
+code_context.snapshots.export_graph_file().
+
 RUNNING IT:
-    python -m mcp_servers.ast_server [--root PATH]
+    python -m mcp_servers.ast_server --snapshot PATH
 Normally you don't run it by hand: an MCP client spawns it over stdio (see
 test_ast_server.py). IMPORTANT: over stdio, stdout IS the protocol channel,
 so this file must never print() — anything on stdout corrupts the stream.
@@ -26,6 +33,7 @@ Diagnostics go to stderr.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import sys
 from typing import Any
@@ -33,20 +41,27 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mcp_servers.ast_graph import DEFAULT_ROOT, ComponentError, build_graph
-
-INSTRUCTIONS = (
-    "Static dependency analysis of the OrderFlow order-processing service. "
-    "Use list_components first if unsure of a name; names are matched loosely "
-    "('PaymentClient', 'PaymentClient.charge', 'payment_client' all work). "
-    "Results include file:line locations you can cite. To read the actual code, "
-    "use the filesystem server — this server only answers structural questions."
-)
+from code_context.contract import CodeContextError
+from code_context.graph import CodeGraph, ComponentError
 
 
-def create_server(root: pathlib.Path | str = DEFAULT_ROOT) -> MCPServer:
-    graph = build_graph(root)
-    server = MCPServer("orderflow-ast", instructions=INSTRUCTIONS)
+def _instructions(graph: CodeGraph) -> str:
+    return (
+        f"Static dependency analysis of {graph.repo or 'a code repository'}"
+        f"{' at commit ' + graph.sha[:7] if graph.sha else ''}. "
+        "Use list_components first if unsure of a name; names are matched loosely "
+        "('PaymentClient', 'PaymentClient.charge', 'payment_client' all work). "
+        "Results include file:line locations you can cite. This server only "
+        "answers structural questions; it does not return source text."
+    )
+
+
+def load_graph(path: pathlib.Path | str) -> CodeGraph:
+    return CodeGraph.from_dict(json.loads(pathlib.Path(path).read_text(encoding="utf-8")))
+
+
+def create_server(graph: CodeGraph) -> MCPServer:
+    server = MCPServer("code-graph", instructions=_instructions(graph))
 
     def _or_tool_error(fn, *args) -> dict[str, Any]:
         # ToolError => the client gets is_error=True plus this message, which
@@ -59,7 +74,7 @@ def create_server(root: pathlib.Path | str = DEFAULT_ROOT) -> MCPServer:
 
     @server.tool()
     def list_components() -> dict[str, Any]:
-        """List every module, class, method and function in OrderFlow, with file paths."""
+        """List every module, class, method and function in the analysed repository, with file paths."""
         return graph.list_components()
 
     @server.tool()
@@ -85,13 +100,14 @@ def create_server(root: pathlib.Path | str = DEFAULT_ROOT) -> MCPServer:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OrderFlow AST dependency MCP server (stdio)")
-    parser.add_argument("--root", default=str(DEFAULT_ROOT), help="directory of Python code to analyse")
+    parser = argparse.ArgumentParser(description="Code dependency graph MCP server (stdio)")
+    parser.add_argument("--snapshot", required=True,
+                        help="path to a graph snapshot JSON (indexer/CONTRACT.md, section 2)")
     args = parser.parse_args()
     try:
-        server = create_server(args.root)
-    except FileNotFoundError as exc:
-        print(f"ast_server: {exc}", file=sys.stderr)
+        server = create_server(load_graph(args.snapshot))
+    except (OSError, ValueError, CodeContextError) as exc:   # unreadable file, bad JSON, unsupported version
+        print(f"ast_server: cannot load snapshot {args.snapshot!r}: {exc}", file=sys.stderr)
         raise SystemExit(2)
     server.run(transport="stdio")
 

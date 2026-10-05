@@ -21,17 +21,28 @@ from dataclasses import dataclass, field
 from mcp import Client, StdioServerParameters
 
 from app.schemas import RetrievedChunk
+from code_context import snapshots
+from code_context.snapshots import SnapshotMeta
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# The custom AST MCP server, spawned as a subprocess per lookup. A module-level
-# value so error-handling tests can swap in a dead one via monkeypatching.
-AST_SERVER = StdioServerParameters(
-    command=sys.executable,
-    args=["-m", "mcp_servers.ast_server"],
-    cwd=PROJECT_ROOT,
-)
+# Test seam. Normally None: each lookup builds the server's launch parameters
+# from the current code snapshot. Error-handling tests set this to a dead or
+# hung server via monkeypatching; when set, it replaces the real server
+# entirely (and no snapshot is consulted).
+AST_SERVER: StdioServerParameters | None = None
 AST_TIMEOUT_S = 20.0
+
+
+def _server_params(snapshot_file: pathlib.Path) -> StdioServerParameters:
+    """The custom AST MCP server, spawned as a subprocess per lookup and
+    pointed at an exported snapshot file — it never gets database credentials
+    (the MCP SDK would not pass them to the child anyway)."""
+    return StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "mcp_servers.ast_server", "--snapshot", str(snapshot_file)],
+        cwd=PROJECT_ROOT,
+    )
 MAX_COMPONENTS = 3   # cap AST lookups if a question names many components
 MIN_NAME_LENGTH = 6  # ignore short names ("Order", "api") — they match everywhere
 
@@ -44,9 +55,11 @@ class ASTLookupResult:
     file_paths: list[str] = field(default_factory=list)
     # Where each matched component is actually defined (from get_dependents's
     # own "defined_in" field, e.g. "app/payment_client.py:12" -> the file
-    # part). Consumed by mcp_clients.github_client to fetch real source text
-    # for the same components this lookup already resolved — reuses this
-    # module's name-matching instead of a second, separate resolution step.
+    # part). app/retrieval.py uses these to read the real source text of the
+    # same components this lookup already resolved from the same snapshot —
+    # reusing this module's name-matching instead of a second resolution step.
+    snapshot: SnapshotMeta | None = None
+    # Which code snapshot answered. None only when the test seam above is used.
 
 
 def _normalize(text: str) -> str:
@@ -71,9 +84,10 @@ def _mentioned_components(question: str, component_listing: dict) -> list[str]:
     return [name for _, name in sorted(matches)]
 
 
-async def _call_ast_tools(question: str, fallback_component: str | None) -> ASTLookupResult:
+async def _call_ast_tools(question: str, fallback_component: str | None,
+                          params: StdioServerParameters) -> ASTLookupResult:
     result = ASTLookupResult(target_component=fallback_component)
-    async with Client(AST_SERVER) as client:
+    async with Client(params) as client:
         listing = await client.call_tool("list_components", {})
         if listing.is_error:
             result.errors.append(f"AST list_components failed: {listing.content[0].text}")
@@ -91,7 +105,7 @@ async def _call_ast_tools(question: str, fallback_component: str | None) -> ASTL
             # QUESTION_TYPES_USING_AST_TOOLS), it would wrongly cap
             # confidence_gate's score via `retrieval_errors`, treating "AST
             # correctly found nothing to add" the same as "Qdrant is down."
-            # Found and fixed 2026-09-27 before re-running the eval harness —
+            # Found and fixed before re-running the eval harness —
             # see FAILURES.md.
             return result
 
@@ -115,12 +129,24 @@ async def _call_ast_tools(question: str, fallback_component: str | None) -> ASTL
 
 
 def lookup_dependents(question: str, fallback_component: str | None) -> ASTLookupResult:
-    """Public entry point: identify which OrderFlow component(s) the question
-    names and fetch each one's dependents from the AST server, bounded by
-    AST_TIMEOUT_S (read at call time, not baked in as a default argument, so a
-    test can lower it via monkeypatching before calling). Raises on a timeout
-    or a subprocess that never starts — app/retrieval.py is responsible for
-    catching that and degrading gracefully."""
+    """Public entry point: identify which component(s) the question names and
+    fetch each one's dependents from the AST server, bounded by AST_TIMEOUT_S
+    (read at call time, not baked in as a default argument, so a test can lower
+    it via monkeypatching before calling).
+
+    Raises on a timeout, a subprocess that never starts, or a code index that
+    cannot be read (code_context.contract.CodeContextError: no snapshot yet,
+    database unreachable, unsupported schema) — app/retrieval.py is
+    responsible for catching that and degrading gracefully."""
+    snapshot: SnapshotMeta | None = None
+    if AST_SERVER is not None:   # test seam: a deliberately broken server
+        params = AST_SERVER
+    else:
+        snapshot = snapshots.get_head()
+        params = _server_params(snapshots.export_graph_file(snapshot))
+
     async def bounded_call() -> ASTLookupResult:
-        return await asyncio.wait_for(_call_ast_tools(question, fallback_component), AST_TIMEOUT_S)
+        result = await asyncio.wait_for(_call_ast_tools(question, fallback_component, params), AST_TIMEOUT_S)
+        result.snapshot = snapshot
+        return result
     return asyncio.run(bounded_call())

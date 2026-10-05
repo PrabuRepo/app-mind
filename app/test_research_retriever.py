@@ -149,8 +149,11 @@ def main() -> int:
     check("retry widens the search",
           all(retry.collection_top_k[c] > first.collection_top_k[c] for c in first.collection_top_k),
           f"{first.collection_top_k} -> {retry.collection_top_k}")
-    check("only impact questions use the AST tools",
-          make_plan("impact_analysis").use_ast_tools and not make_plan("incident_rca").use_ast_tools)
+    check("impact and incident questions use the AST tools, business questions do not",
+          make_plan("impact_analysis").use_ast_tools and make_plan("incident_rca").use_ast_tools
+          and not make_plan("business_functional").use_ast_tools)
+    check("only incident questions read source files from the code index",
+          make_plan("incident_rca").use_source_files and not make_plan("impact_analysis").use_source_files)
     check("unknown question type falls back to a safe plan", bool(make_plan(None).collection_top_k))
 
     print("\n== design-rule question (critic_on): both the doc AND the contradicting postmortem retrieved ==")

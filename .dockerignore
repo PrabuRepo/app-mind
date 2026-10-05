@@ -4,6 +4,8 @@
 __pycache__
 *.pyc
 .env
+.cache
 evals/results
 bkp
 setup-files
+indexer

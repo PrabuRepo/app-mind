@@ -134,6 +134,11 @@ def retriever(state: GraphState) -> dict:
     for mcp_call in result.mcp_calls:
         print(f"[mcp] {mcp_call} invoked")
         mcp_slugs.append(f"mcp:{mcp_call.split()[0].lower()}")   # "AST MCP" -> "mcp:ast"
+    code_index = []
+    if result.snapshot is not None:
+        print(f"[code-index] {result.snapshot.repo}@{result.snapshot.sha[:7]} "
+              f"indexed_at={result.snapshot.indexed_at.isoformat(timespec='seconds')}")
+        code_index = ["code-index"]
     # "llm:embedding" is unconditional: _search_vector_collections() calls
     # embed_query() as the very first thing retrieve() does, every time,
     # regardless of question type or whether the search that follows it
@@ -142,7 +147,7 @@ def retriever(state: GraphState) -> dict:
         "retrieved_chunks": result.chunks,
         "retrieval_errors": result.errors,
         "target_component": result.target_component,
-        "trace": state.trace + ["retriever", "llm:embedding"] + mcp_slugs,
+        "trace": state.trace + ["retriever", "llm:embedding"] + mcp_slugs + code_index,
     }
 
 

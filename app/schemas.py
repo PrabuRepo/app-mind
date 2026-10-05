@@ -173,11 +173,11 @@ class ResearchPlan(BaseModel):
     use_ast_tools: bool = False
     # Whether the Retriever should also query the AST dependency MCP server.
 
-    use_github_tools: bool = False
-    # Whether the Retriever should also fetch real source text for AST-matched
-    # components via the GitHub MCP server (see mcp_clients/github_client.py).
+    use_source_files: bool = False
+    # Whether the Retriever should also attach the real source text of the
+    # AST-matched components, read from the code index (code_context/).
     # Only meaningful alongside use_ast_tools=True — it's the AST lookup's own
-    # file_paths that this step fetches.
+    # file_paths that this step reads.
 
     rationale: str = ""
     # One line saying why this plan — kept so the audit trail can explain the retrieval.

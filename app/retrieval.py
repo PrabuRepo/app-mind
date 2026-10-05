@@ -29,8 +29,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.schemas import ResearchPlan, RetrievedChunk
+from code_context import snapshots
+from code_context.contract import CodeContextError
+from code_context.snapshots import SnapshotMeta
 from mcp_clients.ast_client import lookup_dependents
-from mcp_clients.github_client import fetch_source_files
 from rag.search import BASE_TOP_K, embed_query, plan_top_k, vector_search
 
 # Falls back to this question type when the supervisor's classification is
@@ -38,19 +40,22 @@ from rag.search import BASE_TOP_K, embed_query, plan_top_k, vector_search
 DEFAULT_QUESTION_TYPE = "business_functional"
 
 # Impact-analysis questions need the code-dependency graph (blast radius).
-# Incident RCA questions ALSO get AST tools now (not just impact analysis):
+# Incident RCA questions ALSO get AST tools (not just impact analysis):
 # resolving which component the question names is exactly the file-path
-# resolution the GitHub step needs, and the resulting dependency facts are
-# legitimate RCA context too (e.g. what else calls PaymentClient.charge),
-# not just impact-analysis noise. See TASKS.md's 2026-09-27 GitHub MCP entry.
+# resolution the source-file step needs, and the resulting dependency facts
+# are legitimate RCA context too (e.g. what else calls PaymentClient.charge),
+# not just impact-analysis noise.
 QUESTION_TYPES_USING_AST_TOOLS = {"impact_analysis", "incident_rca"}
 
-# Real source text (via the GitHub MCP server) is only fetched for incident
+# Real source text (read from the code index) is only attached for incident
 # RCA questions — that's the case where quoting the actual bug matters
 # (INC-1001). Impact Analysis already has a free, deterministic ground-truth
-# check built on AST facts alone; adding a live GitHub call there would add
-# cost/latency/a new failure mode without a clear benefit to that metric.
-QUESTION_TYPES_USING_GITHUB_TOOLS = {"incident_rca"}
+# check built on AST facts alone; adding source text there would add
+# evidence volume without a clear benefit to that metric.
+QUESTION_TYPES_READING_SOURCE_FILES = {"incident_rca"}
+
+# Cap on how many files one question can pull into its evidence.
+MAX_SOURCE_FILES = 3
 
 
 @dataclass
@@ -58,6 +63,9 @@ class RetrievalResult:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     target_component: str | None = None
+    snapshot: SnapshotMeta | None = None
+    # The code snapshot (repo @ commit) the code evidence came from, so the
+    # retriever node can log it and citations can name the exact version.
     mcp_calls: list[str] = field(default_factory=list)
     # Which MCP tools were actually invoked this call — appended when the
     # call is attempted, regardless of whether it then succeeds or fails
@@ -77,15 +85,15 @@ def make_plan(question_type: str | None, retry_count: int = 0) -> ResearchPlan:
     resolved_type = question_type if question_type in BASE_TOP_K else DEFAULT_QUESTION_TYPE
     top_k = plan_top_k(resolved_type, retry_count)
     use_ast_tools = resolved_type in QUESTION_TYPES_USING_AST_TOOLS
-    use_github_tools = resolved_type in QUESTION_TYPES_USING_GITHUB_TOOLS
+    use_source_files = resolved_type in QUESTION_TYPES_READING_SOURCE_FILES
     attempt = f"retry {retry_count}, widened top_k" if retry_count else "first pass"
     return ResearchPlan(
         collection_top_k=top_k,
         use_ast_tools=use_ast_tools,
-        use_github_tools=use_github_tools,
+        use_source_files=use_source_files,
         rationale=(f"{resolved_type} ({attempt}): search {top_k}"
                   + (" + AST dependency tools" if use_ast_tools else "")
-                  + (" + GitHub source read" if use_github_tools else "")),
+                  + (" + source files from the code index" if use_source_files else "")),
     )
 
 
@@ -104,29 +112,43 @@ def _search_vector_collections(question: str, plan: ResearchPlan, result: Retrie
 
 def _search_code_dependencies(question: str, target_component: str | None, result: RetrievalResult) -> list[str]:
     """Returns the file paths AST resolved the question's component(s) to, so
-    the caller can optionally chain a real GitHub source read onto them —
-    empty on any failure (nothing to chain)."""
+    the caller can optionally read their real source text from the same code
+    snapshot — empty on any failure (nothing to chain)."""
     result.mcp_calls.append("AST MCP")
     try:
         ast_result = lookup_dependents(question, target_component)
+    except CodeContextError as exc:   # no snapshot yet, database down, unsupported schema...
+        result.errors.append(f"code index unavailable: {exc}")
+        return []
     except Exception as exc:  # includes TimeoutError and a server that won't start
         result.errors.append(f"AST MCP server unavailable: {_describe_error(exc)}")
         return []
     result.chunks.extend(ast_result.chunks)
     result.errors.extend(ast_result.errors)
     result.target_component = ast_result.target_component
+    result.snapshot = ast_result.snapshot
     return ast_result.file_paths
 
 
 def _search_source_code(file_paths: list[str], result: RetrievalResult) -> None:
-    result.mcp_calls.append("GitHub MCP")
-    try:
-        github_result = fetch_source_files(file_paths)
-    except Exception as exc:  # includes TimeoutError, a bad/missing token, network failure
-        result.errors.append(f"GitHub MCP server unavailable: {_describe_error(exc)}")
+    """Attach the stored source text of the files AST resolved. Reads the same
+    snapshot the graph came from, so the text and the dependency facts always
+    describe the same commit. Never raises."""
+    snapshot = result.snapshot
+    if snapshot is None:   # nothing to read from (only when the AST test seam is in use)
         return
-    result.chunks.extend(github_result.chunks)
-    result.errors.extend(github_result.errors)
+    wanted = file_paths[:MAX_SOURCE_FILES]
+    try:
+        files = snapshots.get_files(snapshot.id, wanted)
+    except CodeContextError as exc:
+        result.errors.append(f"code index unavailable: {exc}")
+        return
+    for f in files:
+        result.chunks.append(RetrievedChunk(
+            collection="code", source=f"{snapshot.repo}@{snapshot.sha[:7]}", location=f.path, text=f.content,
+        ))
+    if wanted and not files:
+        result.errors.append(f"none of {wanted} are stored in code snapshot {snapshot.repo}@{snapshot.sha[:7]}")
 
 
 def retrieve(question: str, plan: ResearchPlan, target_component: str | None = None) -> RetrievalResult:
@@ -134,6 +156,6 @@ def retrieve(question: str, plan: ResearchPlan, target_component: str | None = N
     _search_vector_collections(question, plan, result)
     if plan.use_ast_tools:
         file_paths = _search_code_dependencies(question, target_component, result)
-        if plan.use_github_tools and file_paths:
+        if plan.use_source_files and file_paths:
             _search_source_code(file_paths, result)
     return result

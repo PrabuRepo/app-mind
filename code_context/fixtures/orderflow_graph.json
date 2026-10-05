@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "repo": "PrabuRepo/orderflow-app",
+  "sha": "244ea40805e1c5d1d5df0ebd903c4b131c56b51b",
+  "extractor_version": "ast-1",
+  "modules": [
+    "app.api",
+    "app.inventory_client",
+    "app.models",
+    "app.notification_service",
+    "app.order_service",
+    "app.payment_client"
+  ],
+  "symbols": {
+    "app.api": {
+      "kind": "module",
+      "module": "app.api",
+      "file": "app/api.py",
+      "line": 1,
+      "parent": null
+    },
+    "app.api.create_order": {
+      "kind": "function",
+      "module": "app.api",
+      "file": "app/api.py",
+      "line": 13,
+      "parent": null
+    },
+    "app.inventory_client": {
+      "kind": "module",
+      "module": "app.inventory_client",
+      "file": "app/inventory_client.py",
+      "line": 1,
+      "parent": null
+    },
+    "app.inventory_client.InsufficientStockError": {
+      "kind": "class",
+      "module": "app.inventory_client",
+      "file": "app/inventory_client.py",
+      "line": 13,
+      "parent": null
+    },
+    "app.inventory_client.InventoryClient": {
+      "kind": "class",
+      "module": "app.inventory_client",
+      "file": "app/inventory_client.py",
+      "line": 17,
+      "parent": null
+    },
+    "app.inventory_client.InventoryClient.__init__": {
+      "kind": "function",
+      "module": "app.inventory_client",
+      "file": "app/inventory_client.py",
+      "line": 20,
+      "parent": "app.inventory_client.InventoryClient"
+    },
+    "app.inventory_client.InventoryClient.reserve_stock": {
+      "kind": "function",
+      "module": "app.inventory_client",
+      "file": "app/inventory_client.py",
+      "line": 28,
+      "parent": "app.inventory_client.InventoryClient"
+    },
+    "app.inventory_client.ReservationResult": {
+      "kind": "class",
+      "module": "app.inventory_client",
+      "file": "app/inventory_client.py",
+      "line": 7,
+      "parent": null
+    },
+    "app.models": {
+      "kind": "module",
+      "module": "app.models",
+      "file": "app/models.py",
+      "line": 1,
+      "parent": null
+    },
+    "app.models.Order": {
+      "kind": "class",
+      "module": "app.models",
+      "file": "app/models.py",
+      "line": 24,
+      "parent": null
+    },
+    "app.models.Order.total_cents": {
+      "kind": "function",
+      "module": "app.models",
+      "file": "app/models.py",
+      "line": 32,
+      "parent": "app.models.Order"
+    },
+    "app.models.OrderItem": {
+      "kind": "class",
+      "module": "app.models",
+      "file": "app/models.py",
+      "line": 17,
+      "parent": null
+    },
+    "app.models.OrderStatus": {
+      "kind": "class",
+      "module": "app.models",
+      "file": "app/models.py",
+      "line": 8,
+      "parent": null
+    },
+    "app.models.PaymentResult": {
+      "kind": "class",
+      "module": "app.models",
+      "file": "app/models.py",
+      "line": 37,
+      "parent": null
+    },
+    "app.notification_service": {
+      "kind": "module",
+      "module": "app.notification_service",
+      "file": "app/notification_service.py",
+      "line": 1,
+      "parent": null
+    },
+    "app.notification_service.NotificationService": {
+      "kind": "class",
+      "module": "app.notification_service",
+      "file": "app/notification_service.py",
+      "line": 4,
+      "parent": null
+    },
+    "app.notification_service.NotificationService.send_confirmation": {
+      "kind": "function",
+      "module": "app.notification_service",
+      "file": "app/notification_service.py",
+      "line": 5,
+      "parent": "app.notification_service.NotificationService"
+    },
+    "app.order_service": {
+      "kind": "module",
+      "module": "app.order_service",
+      "file": "app/order_service.py",
+      "line": 1,
+      "parent": null
+    },
+    "app.order_service.OrderPlacementError": {
+      "kind": "class",
+      "module": "app.order_service",
+      "file": "app/order_service.py",
+      "line": 19,
+      "parent": null
+    },
+    "app.order_service.OrderService": {
+      "kind": "class",
+      "module": "app.order_service",
+      "file": "app/order_service.py",
+      "line": 23,
+      "parent": null
+    },
+    "app.order_service.OrderService.__init__": {
+      "kind": "function",
+      "module": "app.order_service",
+      "file": "app/order_service.py",
+      "line": 24,
+      "parent": "app.order_service.OrderService"
+    },
+    "app.order_service.OrderService.new_order_id": {
+      "kind": "function",
+      "module": "app.order_service",
+      "file": "app/order_service.py",
+      "line": 48,
+      "parent": "app.order_service.OrderService"
+    },
+    "app.order_service.OrderService.place_order": {
+      "kind": "function",
+      "module": "app.order_service",
+      "file": "app/order_service.py",
+      "line": 29,
+      "parent": "app.order_service.OrderService"
+    },
+    "app.payment_client": {
+      "kind": "module",
+      "module": "app.payment_client",
+      "file": "app/payment_client.py",
+      "line": 1,
+      "parent": null
+    },
+    "app.payment_client.PaymentClient": {
+      "kind": "class",
+      "module": "app.payment_client",
+      "file": "app/payment_client.py",
+      "line": 22,
+      "parent": null
+    },
+    "app.payment_client.PaymentClient.__init__": {
+      "kind": "function",
+      "module": "app.payment_client",
+      "file": "app/payment_client.py",
+      "line": 25,
+      "parent": "app.payment_client.PaymentClient"
+    },
+    "app.payment_client.PaymentClient._submit_charge": {
+      "kind": "function",
+      "module": "app.payment_client",
+      "file": "app/payment_client.py",
+      "line": 54,
+      "parent": "app.payment_client.PaymentClient"
+    },
+    "app.payment_client.PaymentClient.charge": {
+      "kind": "function",
+      "module": "app.payment_client",
+      "file": "app/payment_client.py",
+      "line": 28,
+      "parent": "app.payment_client.PaymentClient"
+    },
+    "app.payment_client.PaymentGatewayTimeoutError": {
+      "kind": "class",
+      "module": "app.payment_client",
+      "file": "app/payment_client.py",
+      "line": 18,
+      "parent": null
+    }
+  },
+  "imports": {
+    "app.api": {
+      "app.models": {
+        "symbols": [
+          "Order",
+          "OrderItem"
+        ],
+        "wholesale": false,
+        "line": 5
+      },
+      "app.order_service": {
+        "symbols": [
+          "OrderPlacementError",
+          "OrderService"
+        ],
+        "wholesale": false,
+        "line": 6
+      }
+    },
+    "app.order_service": {
+      "app.inventory_client": {
+        "symbols": [
+          "InventoryClient"
+        ],
+        "wholesale": false,
+        "line": 13
+      },
+      "app.models": {
+        "symbols": [
+          "Order",
+          "OrderStatus"
+        ],
+        "wholesale": false,
+        "line": 14
+      },
+      "app.notification_service": {
+        "symbols": [
+          "NotificationService"
+        ],
+        "wholesale": false,
+        "line": 15
+      },
+      "app.payment_client": {
+        "symbols": [
+          "PaymentClient"
+        ],
+        "wholesale": false,
+        "line": 16
+      }
+    },
+    "app.payment_client": {
+      "app.models": {
+        "symbols": [
+          "PaymentResult"
+        ],
+        "wholesale": false,
+        "line": 12
+      }
+    }
+  },
+  "calls": [
+    {
+      "caller": "app.api.create_order",
+      "target": "app.models.Order",
+      "file": "app/api.py",
+      "line": 14
+    },
+    {
+      "caller": "app.api.create_order",
+      "target": "app.order_service.OrderService.place_order",
+      "file": "app/api.py",
+      "line": 16
+    },
+    {
+      "caller": "app.api.create_order",
+      "target": "app.order_service.OrderService.new_order_id",
+      "file": "app/api.py",
+      "line": 14
+    },
+    {
+      "caller": "app.api",
+      "target": "app.order_service.OrderService.__init__",
+      "file": "app/api.py",
+      "line": 9
+    },
+    {
+      "caller": "app.inventory_client.InventoryClient.reserve_stock",
+      "target": "app.inventory_client.ReservationResult",
+      "file": "app/inventory_client.py",
+      "line": 37
+    },
+    {
+      "caller": "app.inventory_client.InventoryClient.reserve_stock",
+      "target": "app.inventory_client.ReservationResult",
+      "file": "app/inventory_client.py",
+      "line": 31
+    },
+    {
+      "caller": "app.order_service.OrderService.__init__",
+      "target": "app.payment_client.PaymentClient.__init__",
+      "file": "app/order_service.py",
+      "line": 25
+    },
+    {
+      "caller": "app.order_service.OrderService.__init__",
+      "target": "app.inventory_client.InventoryClient.__init__",
+      "file": "app/order_service.py",
+      "line": 26
+    },
+    {
+      "caller": "app.order_service.OrderService.__init__",
+      "target": "app.notification_service.NotificationService",
+      "file": "app/order_service.py",
+      "line": 27
+    },
+    {
+      "caller": "app.order_service.OrderService.place_order",
+      "target": "app.payment_client.PaymentClient.charge",
+      "file": "app/order_service.py",
+      "line": 37
+    },
+    {
+      "caller": "app.order_service.OrderService.place_order",
+      "target": "app.notification_service.NotificationService.send_confirmation",
+      "file": "app/order_service.py",
+      "line": 43
+    },
+    {
+      "caller": "app.order_service.OrderService.place_order",
+      "target": "app.inventory_client.InventoryClient.reserve_stock",
+      "file": "app/order_service.py",
+      "line": 31
+    },
+    {
+      "caller": "app.order_service.OrderService.place_order",
+      "target": "app.order_service.OrderPlacementError",
+      "file": "app/order_service.py",
+      "line": 40
+    },
+    {
+      "caller": "app.order_service.OrderService.place_order",
+      "target": "app.order_service.OrderPlacementError",
+      "file": "app/order_service.py",
+      "line": 34
+    },
+    {
+      "caller": "app.payment_client.PaymentClient.charge",
+      "target": "app.models.PaymentResult",
+      "file": "app/payment_client.py",
+      "line": 47
+    },
+    {
+      "caller": "app.payment_client.PaymentClient.charge",
+      "target": "app.payment_client.PaymentClient._submit_charge",
+      "file": "app/payment_client.py",
+      "line": 42
+    },
+    {
+      "caller": "app.payment_client.PaymentClient._submit_charge",
+      "target": "app.models.PaymentResult",
+      "file": "app/payment_client.py",
+      "line": 61
+    }
+  ]
+}

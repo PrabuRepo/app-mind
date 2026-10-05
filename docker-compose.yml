@@ -51,10 +51,26 @@ services:
       POSTGRES_HOST: postgres
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379/0
+      # Which indexed repository code questions are about (see code_context/).
+      APPMIND_CODE_REPO: ${GITHUB_TARGET_REPO}
     env_file:
       - .env
     ports:
       - "8501:8501"
+
+  # One-shot: indexes the repositories in indexer/targets.toml into Postgres,
+  # then exits. Built from ./indexer alone (it contains no AppMind code) and
+  # given only the variables it needs, not the whole .env. The app does not
+  # wait on it. Refresh manually with: docker compose run --rm indexer
+  indexer:
+    build: ./indexer
+    container_name: appmind-indexer
+    restart: "no"
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
 
 volumes:
   appmind_pg_data:

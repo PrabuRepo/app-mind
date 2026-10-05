@@ -17,10 +17,10 @@ mandatory comparative eval measures.
 ## Target application: "OrderFlow" (synthetic, intentionally)
 
 A small order-processing service, purpose-built for this project so
-ingestion/AST tooling has real code to operate on. Hosted at
-`github.com/PrabuRepo/orderflow-app`, checked out locally at
-`orderflow-app/app/`:
-- `api.py` → `order_service.py` (the hub) → `payment_client.py` /
+indexing/AST tooling has real code to operate on. It lives in its own
+repository, `github.com/PrabuRepo/orderflow-app`, and is **never copied into
+this repo** — the indexer reads it from GitHub (see "Knowledge domains"):
+- `app/api.py` → `order_service.py` (the hub) → `payment_client.py` /
   `inventory_client.py` / `notification_service.py`
 - **Planted bug (intentional — do not "fix" without checking eval impact
   first):** `payment_client.py`'s retry loop generates a new transaction on
@@ -33,25 +33,39 @@ ingestion/AST tooling has real code to operate on. Hosted at
   docs + incidents, e.g. "Does OrderFlow reserve inventory before or after
   payment, and why does that ordering matter?"
 - **Incident/RCA** — root-cause investigation of a real incident, with real
-  source code cited via GitHub MCP, e.g. "Why were customers charged twice
-  for one order (INC-1001), and is the cause confirmed?"
+  source code cited from the code index (citation reads `repo@sha`), e.g.
+  "Why were customers charged twice for one order (INC-1001), and is the
+  cause confirmed?"
 - **Impact Analysis** — code-dependency "blast radius" questions, answered
   deterministically from the AST server's real dependency graph, e.g. "What
   would be affected if we changed PaymentClient's retry logic?"
 
 ## Knowledge domains
 
-- **Code: MCP/AST search only. NOT RAG.** A deliberate architecture
+- **Code: a graph + source-file index, NOT RAG.** A deliberate architecture
   decision — code is never embedded into the vector store, because
-  cross-file dependency analysis needs every file parsed together (not
-  fetched one-at-a-time), and an embedded snapshot goes silently stale the
-  moment the code changes.
-  - **Custom MCP server** (`mcp_servers/ast_server.py`) — local, offline
-    4-pass static analysis exposing `list_components()` / `get_dependents()`
-    / `get_callers()`. Needs a local checkout of the target app.
-  - **GitHub MCP** (`mcp_clients/github_client.py`) — the official, remote
-    GitHub MCP server, fetching real file text on demand for citation-grade
-    evidence on Incident/RCA questions. PAT-scoped read-only.
+  "what depends on X" is a graph question with one correct answer, and an
+  embedded snapshot goes silently stale the moment the code changes. Code is
+  **indexed ahead of time and read from AppMind's own store at question
+  time**: answering a question never contacts GitHub or a local checkout.
+  - **`indexer/`** — a **self-contained project** (own README, Dockerfile,
+    requirements, tests; imports nothing from AppMind) that downloads each
+    repo in `indexer/targets.toml` at a pinned commit SHA, builds a static
+    dependency/call graph (4-pass AST analysis), and writes the graph and
+    source files to Postgres in one transaction per repo. It is built to move
+    to its own repository later. Its only interface with AppMind is the data
+    contract in `indexer/CONTRACT.md` (tables + graph JSON schema v1).
+  - **`code_context/`** — AppMind's read-only view of that store: reads
+    snapshots, checks `schema_version`, rebuilds the graph for queries. The
+    only AppMind code that knows the contract. **Never import `indexer/`
+    from AppMind or AppMind from `indexer/`** — `code_context/test_boundaries.py`
+    fails the build if you do.
+  - **Custom MCP server** (`mcp_servers/ast_server.py`) — exposes
+    `list_components()` / `get_dependents()` / `get_callers()`; loads a
+    snapshot file exported from Postgres, never parses code or reads a repo.
+  - **GitHub MCP client** (`mcp_clients/github_client.py`) — kept as an
+    optional live fallback; no longer on the default path.
+  - Design and rationale: `features/code-index-design.md`.
 - **RAG domains: `docs` + `incidents` only** (2 Qdrant collections, kept
   separate so each has its own top-k policy per question type). Source
   files in `knowledge-domains/docs/` (3 files) and `knowledge-domains/incidents/`
@@ -94,9 +108,9 @@ app.graph` runs a live smoke test).
 |---|---|
 | LangGraph | Stateful orchestration — conditional routing per `pipeline_mode`, the Critic retry loop |
 | Pydantic | Validated schemas for every inter-node payload |
-| MCP SDK | Standard protocol for both code-access tools (AST server + GitHub) |
+| MCP SDK | Standard protocol for the code-graph tool (custom AST server) and the optional GitHub fallback client |
 | Qdrant | Vector search — `docs` / `incidents` collections |
-| PostgreSQL | Investigation audit trail (`memory/db.py`) — one row per completed run |
+| PostgreSQL | Investigation audit trail (`memory/db.py`, one row per completed run) **and** the code knowledge store written by `indexer/` (`code_snapshots`, `code_files`, `code_heads`, `index_runs`) |
 | Redis | Investigation-lookup cache (`memory/cache.py`), keyed on `(question, pipeline_mode)` |
 | Streamlit | Single-page UI, calls the pipeline in-process — no separate API layer |
 | OpenAI (`gpt-5.4-mini`) | LLM reasoning + embeddings (`text-embedding-3-small`) |
@@ -105,15 +119,20 @@ app.graph` runs a live smoke test).
 ## Infra
 
 - Docker: `docker compose up -d` from the repo root — Postgres, Qdrant,
-  Redis. Use real connections, no in-memory/SQLite stand-ins.
+  Redis. Use real connections, no in-memory/SQLite stand-ins. `docker compose
+  up --build -d` also runs the app and a one-shot `indexer` (built from
+  `./indexer` alone; refresh with `docker compose run --rm indexer`).
 - Qdrant: `localhost:6333`, 2 collections (`docs`, `incidents`)
 - Postgres: `localhost:5432` — `investigations` audit-trail table, written
   by `memory_write` on every run
 - Redis: `localhost:6379` — investigation-lookup cache; `evals/run_eval.py`
   deliberately never reads it, so every eval run is measured fresh
 - `.env` at the repo root (template: `setup-files/.env.example`) —
-  `OPENAI_API_KEY`, `GITHUB_TOKEN` (a fine-grained, read-only PAT),
-  `GITHUB_TARGET_REPO`, Postgres/Qdrant/Redis connection settings
+  `OPENAI_API_KEY`, `GITHUB_TOKEN` (a fine-grained, read-only PAT, used by the
+  indexer), `GITHUB_TARGET_REPO` (also passed to the app as
+  `APPMIND_CODE_REPO`, which repo code questions are about),
+  Postgres/Qdrant/Redis connection settings. `APPMIND_EVAL_SNAPSHOT=<sha>`
+  pins the eval harness's impact-analysis ground truth to an exact commit.
 
 ## Eval harness
 
@@ -121,7 +140,8 @@ Custom-built (`evals/run_eval.py` + `llm_as_judge/`), direct SDK calls —
 not a framework like promptfoo/ragas. Runs all 9 dataset questions × 3
 `pipeline_mode`s. Scoring: an LLM-as-judge for subjective questions, plus a
 deterministic, zero-cost check for Impact Analysis questions (compares the
-answer directly against the AST server's own `get_dependents()` output).
+answer directly against the code graph's own `get_dependents()` output, from
+a pinned snapshot).
 
 ## Safety/process notes
 

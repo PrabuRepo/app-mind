@@ -21,6 +21,10 @@ import sys
 from mcp import Client, StdioServerParameters
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+# A graph snapshot of the sample application, produced once by the indexer's
+# extractor (indexer/CONTRACT.md, schema v1). No source tree and no database
+# needed to run this test.
+GRAPH_FIXTURE = PROJECT_ROOT / "code_context" / "fixtures" / "orderflow_graph.json"
 
 failures: list[str] = []
 
@@ -38,7 +42,7 @@ def symbols(entries: list[dict], depth: int | None = None) -> set[str]:
 async def main() -> int:
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "mcp_servers.ast_server"],
+        args=["-m", "mcp_servers.ast_server", "--snapshot", str(GRAPH_FIXTURE)],
         cwd=PROJECT_ROOT,
     )
     async with Client(params) as client:

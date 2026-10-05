@@ -11,9 +11,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Everything else, including orderflow-app/ — the custom AST MCP server is
-# spawned as an in-process subprocess (see mcp_clients/ast_client.py), not a
-# separate container, so it needs these files present in this same image.
+# Everything else. The custom AST MCP server is spawned as a subprocess of the
+# app (see mcp_clients/ast_client.py), not a separate container, so its code
+# lives in this same image. It loads a code snapshot exported from Postgres —
+# no target repository is ever copied into the image. The indexer
+# (indexer/) is a separate project with its own image and is excluded via
+# .dockerignore.
 COPY . .
 
 EXPOSE 8501

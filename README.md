@@ -39,16 +39,20 @@ One line each, linking to the folder:
 | [`agents/`](agents/) | The three LLM-driven reasoning agents the comparative eval is built around:<br>- **Evidence** — extracts claims with verbatim quotes, then mechanically verifies each quote against its source text (never trusted from the model).<br>- **Critic** — reviews evidence for contradictions, uncited claims, and gaps with a deliberately generic prompt; the sole difference between `critic_on` and `critic_off` is whether this agent runs.<br>- **Synthesis** — writes the final decision brief, from verified evidence (critic_off/critic_on) or raw retrieved chunks (baseline, unverified). |
 | [`guardrails/`](guardrails/) | Input guardrail (blocks PII-looking questions before any cost is incurred) and output guardrail (blocks an uncited answer from shipping). |
 | [`rag/`](rag/) | Embeds a question and searches Qdrant's `docs`/`incidents` collections — the RAG half of retrieval. |
-| [`mcp_servers/`](mcp_servers/) | The custom AST dependency-graph MCP server — a local, offline static analysis of OrderFlow exposing `list_components`/`get_dependents`/`get_callers`. |
-| [`mcp_clients/`](mcp_clients/) | The two MCP clients: a local stdio client for the AST server, and a remote client for GitHub's hosted MCP server (real source-text citations). |
+| [`mcp_servers/`](mcp_servers/) | The custom AST dependency-graph MCP server. It loads a code snapshot (built ahead of time by the indexer) and exposes `list_components`/`get_dependents`/`get_callers`; it never parses code or touches a repository. |
+| [`mcp_clients/`](mcp_clients/) | The AST client (a stdio client that points the AST server at the current code snapshot) and a GitHub MCP client, now an optional live fallback rather than part of the default path. |
+| [`code_context/`](code_context/) | AppMind's read-only view of the code knowledge store: reads snapshots, checks their schema version, and rebuilds the dependency graph to answer questions. The only AppMind code that knows the indexer's data contract. |
+| [`indexer/`](indexer/) | A **self-contained project** (own README, Dockerfile, requirements, tests) that turns configured GitHub repositories into the code knowledge store: dependency graph and source files in Postgres, tagged with the commit SHA. It imports nothing from AppMind; see [`indexer/CONTRACT.md`](indexer/CONTRACT.md). Built to move to its own repository. |
 | [`memory/`](memory/) | The Postgres audit trail (one row per investigation) and the Redis investigation-lookup cache. |
 | [`ingest/`](ingest/) | Chunks, embeds, and loads the `knowledge-domains/` corpus into Qdrant. |
 | [`knowledge-domains/`](knowledge-domains/) | The RAG corpus itself — OrderFlow's docs and incident reports, each incident planting a different kind of investigative trap. |
-| [`orderflow-app/`](orderflow-app/) | OrderFlow — the synthetic target application AppMind investigates, including its one intentionally planted bug. |
 | [`evals/`](evals/) | The comparative eval harness: the 9-question dataset, the runner, and the results. |
 | [`llm_as_judge/`](llm_as_judge/) | The LLM-as-judge used by the eval harness to score subjective questions. |
 | [`ui/`](ui/) | The Streamlit front end. |
 | [`docs/`](docs/) | Submission documentation: the approved design doc, the full documentation, a focused 3-topic summary, and the detailed pipeline diagram. |
+| [`features/`](features/) | Design documents for features beyond the submitted scope, e.g. [`code-index-design.md`](features/code-index-design.md) (the code knowledge index). |
+
+**The target application.** AppMind investigates **OrderFlow**, a synthetic order-processing service that lives in its own repository, [`PrabuRepo/orderflow-app`](https://github.com/PrabuRepo/orderflow-app) (it includes one intentionally planted bug). It is **not** copied into this repository: the indexer reads it from GitHub and stores the derived knowledge.
 | [`setup-files/`](setup-files/) | Earlier setup notes — **stale**, written before the build diverged from the original plan (a different tech stack, different file layout). Use this README instead. |
 
 ---
@@ -58,8 +62,8 @@ One line each, linking to the folder:
 - **Python 3.11+** (built and tested on 3.13)
 - **Docker Desktop** (Postgres, Qdrant, Redis run as containers — see `docker-compose.yml`)
 - **An OpenAI API key** (LLM calls + embeddings)
-- **A GitHub fine-grained personal access token**, scoped to **read-only "Contents"** access on your target repository only — used by the GitHub MCP integration to fetch real source text for incident investigations. Not the same as a classic token; generate it at github.com → Settings → Developer settings → Fine-grained tokens.
-- **Node.js is *not* required.** An earlier plan used the official Filesystem MCP server (which needs Node); that was superseded by the GitHub MCP integration, which needs nothing installed locally (see [`docs/detailed-design.md`](docs/detailed-design.md) §4 for why).
+- **A GitHub fine-grained personal access token**, scoped to **read-only "Contents"** access on your target repository only — used by the **indexer** to download the repository at a pinned commit. Not the same as a classic token; generate it at github.com → Settings → Developer settings → Fine-grained tokens. Answering a question never contacts GitHub.
+- **Node.js is *not* required.** An earlier plan used the official Filesystem MCP server (which needs Node); that was superseded (see [`docs/detailed-design.md`](docs/detailed-design.md) §4 for why).
 
 ## Setup
 
@@ -87,22 +91,33 @@ Copy-Item setup-files\.env.example .env
 cp setup-files/.env.example .env
 # then open .env and fill in OPENAI_API_KEY, GITHUB_TOKEN, GITHUB_TARGET_REPO
 
-# 5. Load the knowledge base into Qdrant
+# 5. Load the docs/incidents knowledge base into Qdrant
 python -m ingest.run_ingestion
+
+# 6. Index the target repository's code (dependency graph + source files) into Postgres
+pip install -r indexer/requirements.txt     # the indexer has its own requirements
+cd indexer && python -m appmind_indexer.run && cd ..
 ```
+
+The indexer reads the repositories listed in [`indexer/targets.toml`](indexer/targets.toml) from GitHub, pinned to a commit, and stores the result; re-running it skips repositories that haven't changed. Until it has run once, questions that need code (impact analysis, incident root cause) escalate with a clear "no code snapshot — run the indexer" message instead of guessing. See [`indexer/README.md`](indexer/README.md).
 
 ## Running it, fully containerized (one command)
 
-A faster alternative to Setup steps 2, 3, and 5 above — no local Python install, no manual venv, no manual ingestion. Still needs `.env` (Setup step 4), since secrets have to come from somewhere, and `.env` is passed into the container via `env_file:` in `docker-compose.yml` — never baked into the image itself.
+A faster alternative to Setup steps 2, 3, 5 and 6 above — no local Python install, no manual venv, no manual ingestion or indexing. Still needs `.env` (Setup step 4), since secrets have to come from somewhere, and `.env` is passed into the container via `env_file:` in `docker-compose.yml` — never baked into the image itself.
 
-**Start everything** — Postgres, Qdrant, Redis, and the app itself. On first boot, the app container automatically loads the knowledge base into Qdrant before starting the UI (checks whether `docs`/`incidents` already have data first, so a restart doesn't silently re-ingest every time):
+**Start everything** — Postgres, Qdrant, Redis, the app itself, and a one-shot **indexer** container. On first boot, the app container automatically loads the docs/incidents knowledge base into Qdrant before starting the UI (checks whether `docs`/`incidents` already have data first, so a restart doesn't silently re-ingest every time), and the indexer indexes the target repository's code, then exits (the app does not wait on it):
 ```bash
 docker compose up --build -d
 ```
 
 **Check it's up:**
 ```bash
-docker compose ps          # all 4 should show "Up"
+docker compose ps          # postgres, qdrant, redis, app should show "Up"; indexer runs once and exits (0)
+```
+
+**Refresh the code index** (e.g. after the target repository changes; an unchanged commit is skipped):
+```bash
+docker compose run --rm indexer
 ```
 
 **Test it:** open `http://localhost:8501` — same UI, same behavior as running it locally.
@@ -148,16 +163,19 @@ python -m evals.run_eval                    # full 9-question x 3-mode run
 python -m evals.run_eval --only D1,D2       # just these questions, for cheap iteration
 python -m evals.run_eval --trials 2         # multiple trials per (question, mode)
 ```
-Results land in `evals/results/runs.jsonl` (every run, raw) and `evals/results/summary.md` (the summary tables).
+Results land in `evals/results/runs.jsonl` (every run, raw) and `evals/results/summary.md` (the summary tables). Impact-analysis answers are scored against a code snapshot; pin it to an exact commit with `APPMIND_EVAL_SNAPSHOT=<sha>` so ground truth can't drift when the target repository changes (the summary records which snapshot was used).
 
 **Test suites** (each module is runnable standalone):
 ```bash
 python -m agents.test_evidence
 python -m agents.test_critic
 python -m mcp_servers.test_ast_server
-python -m mcp_clients.test_github_client
+python -m code_context.test_code_context     # needs the Postgres container
+python -m code_context.test_boundaries       # guards the indexer / AppMind import boundary
+python -m mcp_clients.test_github_client     # optional GitHub client; live, needs GITHUB_TOKEN
 python -m memory.test_db
 python -m memory.test_cache
+cd indexer && python -m tests.run_all        # the indexer's own suite (also needs Postgres)
 ```
 
 ---
@@ -174,7 +192,7 @@ The Streamlit UI (`http://localhost:8501`) always runs in `critic_on` mode — t
 ### Use case 2 — Incident/RCA ("why did this break")
 > *Why were customers charged twice for one order (INC-1001), and is the cause confirmed?*
 
-**Look for:** a citation from `app/payment_client.py` — real source code, fetched live via the GitHub MCP integration, not just the incident report. If it's working, you'll see the literal line about retries having no idempotency key, quoted verbatim. This is the single best question to demo the GitHub MCP payoff.
+**Look for:** a citation from `app/payment_client.py` — real source code, read from the code index (the citation's source reads `PrabuRepo/orderflow-app@<commit>`, so you can see exactly which version of the code it came from), not just the incident report. If it's working, you'll see the bug described: each retry generates a new `transaction_id` with no idempotency key. This is the single best question to demo the code index payoff.
 
 ### Use case 3 — Impact Analysis ("what breaks if we change X")
 > *What would be affected if we changed PaymentClient's retry logic?*

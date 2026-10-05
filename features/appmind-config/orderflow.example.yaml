@@ -1,0 +1,117 @@
+# yaml-language-server: $schema=./appmind-app.schema.json
+#
+# Example application profile: OrderFlow, with the values AppMind hardcodes for
+# it today. Each section notes where the value lives now. This file is a
+# design illustration, not yet read by the code. It must always validate
+# against appmind-app.schema.json.
+
+schema_version: 1
+
+app:
+  id: orderflow
+  name: OrderFlow
+  description: Order-processing service (orders, payments, inventory, notifications).
+  owners: [team-orders]
+  tags: [demo, synthetic]
+
+scope:
+  # Today: TOPIC_DESCRIPTION in guardrails/input_guardrail.py
+  description: >
+    OrderFlow order-processing service: placing orders, payment processing,
+    PaymentClient, gateway timeouts, retries, and duplicate charges, inventory
+    reservation, InventoryClient, stock levels and oversell, order confirmation
+    notifications, NotificationService, incidents and root cause investigations,
+    and OrderFlow's architecture, source code, and code dependencies.
+  # Today: the keyword -> component map in the supervisor (app/graph.py)
+  aliases:
+    PaymentClient: [payment, charge, charged]
+    InventoryClient: [invent, stock, oversell]
+
+sources:
+  code:
+    # Today: indexer/targets.toml
+    - repo: PrabuRepo/orderflow-app
+      ref: main
+      source_root: .
+      language: python
+      exclude: ["**/tests/**"]
+      auth: { secret: GITHUB_TOKEN }
+  docs:
+    # Today: DOMAIN_FOLDERS in ingest/run_ingestion.py
+    - path: knowledge-domains/docs
+      kind: architecture
+  incidents:
+    - path: knowledge-domains/incidents
+      kind: incident
+
+# Today: the supervisor's keyword checks, BASE_TOP_K in rag/search.py, and
+# QUESTION_TYPES_USING_AST_TOOLS / QUESTION_TYPES_READING_SOURCE_FILES in app/retrieval.py
+question_types:
+  business_functional:
+    sources: [docs, incidents]
+    top_k: { docs: 4, incidents: 3 }
+  incident_rca:
+    sources: [docs, incidents, code]
+    top_k: { docs: 3, incidents: 5 }
+    use_code_graph: true
+    attach_source_files: true
+    classifier: { mode: keywords, keywords: [incident, charge, bug] }
+  impact_analysis:
+    sources: [docs, incidents, code]
+    top_k: { docs: 3, incidents: 2 }
+    use_code_graph: true
+    classifier: { mode: keywords, keywords: [affect, depend, break] }
+
+# Today: constants in rag/search.py, app/retrieval.py, mcp_clients/ast_client.py
+retrieval:
+  min_score: 0.25
+  retry_extra_top_k: 3
+  max_source_files: 3
+  max_components: 3
+  min_component_name_length: 6
+
+# Today: confidence_gate and route_after_gate in app/graph.py
+quality:
+  escalate_below: 0.5
+  flag_penalty: 0.3
+  error_cap: 0.4
+  max_retries: 2
+  critic: { enabled: true }
+
+escalation:
+  message: AppMind could not reach sufficient confidence to answer automatically.
+
+guardrails:
+  pii: { enabled: true, builtin: [email, phone, ssn], action: block }
+  topic: { enabled: true, threshold: 0.18 }
+  output: { require_citations: true }
+
+# Today: app/llm.py and rag/search.py
+models:
+  llm: gpt-5.4-mini
+  embedding: text-embedding-3-small
+  timeout_s: 60
+  max_output_tokens: 3000
+
+indexing:
+  trigger: manual
+  retention: 5
+  max_file_bytes: 200000
+
+storage:
+  namespace: orderflow
+  cache_ttl: 24h
+
+eval:
+  dataset: evals/dataset.py   # becomes a data file once config-driven
+  trials: 1
+  pin_snapshot: head
+
+ui:
+  title: AppMind
+  example_questions:
+    - Why were customers charged twice for one order?
+    - What would be affected if we changed PaymentClient's retry logic?
+
+secrets:
+  required: [OPENAI_API_KEY, GITHUB_TOKEN]

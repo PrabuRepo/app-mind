@@ -3,18 +3,21 @@ mcp_clients/github_client.py — the MCP CLIENT for GitHub's remote-hosted MCP
 server, used to fetch REAL source text (not just AST structural facts) for
 citation-grade evidence on incident_rca questions.
 
+STATUS: no longer on the default retrieval path. Source text for citations is
+now read from the code index (code_context/), which the separate indexer
+project builds ahead of time, so answering a question never contacts GitHub.
+This module is kept, with its tests, as an optional LIVE fallback (for
+example, confirming a file against the repository's current HEAD).
+
 Deliberately separate from mcp_clients/ast_client.py: that module resolves
-WHICH files matter (name matching + dependency facts, via the local AST
-server); this one only knows how to fetch a given file's actual content from
-the real hosted orderflow-app repo. app/retrieval.py is the only caller,
-chaining ast_client's file_paths into this module — same "one coordinator,
-several single-purpose sources" shape rag/search.py and ast_client.py already
-use.
+WHICH files matter (name matching + dependency facts, via the AST server);
+this one only knows how to fetch a given file's actual content from the real
+hosted repo.
 
 Uses the REMOTE hosted GitHub MCP server (https://api.githubcopilot.com/mcp/)
-over streamable HTTP, not a local subprocess — see TASKS.md's 2026-09-27
-"Reviving GitHub MCP" decision for why (no Node.js/Docker needed; PAT auth to
-this endpoint does not require a Copilot subscription). Read-only in
+over streamable HTTP, not a local subprocess — see TASKS.md's "Reviving
+GitHub MCP" decision for why (no Node.js/Docker needed; PAT auth to this
+endpoint does not require a Copilot subscription). Read-only in
 practice via the PAT's own scope (GITHUB_TOKEN must only ever be granted
 "Contents: Read-only" on the target repo) — this module never calls a write
 tool, but the real enforcement is GitHub rejecting a write from a read-scoped
@@ -64,7 +67,7 @@ def _client() -> Client:
     # version and, on a fresh session, raised "missing Mcp-Param-<name>
     # header" on the FIRST call_tool if it wasn't preceded by a list_tools
     # call in the same session (found empirically — see chat/TASKS.md,
-    # 2026-09-27). Forcing the plain initialize handshake sidesteps that
+    # FAILURES.md #17). Forcing the plain initialize handshake sidesteps that
     # negotiation entirely rather than paying for an extra round-trip.
     return Client(transport, mode="legacy")
 
@@ -73,7 +76,7 @@ def _extract_text(tool_result) -> str | None:
     """The real file text comes back as an EmbeddedResource content block,
     NOT the leading TextContent block (which is just a status message like
     "successfully downloaded text file (SHA: ...)"). Found by inspecting the
-    actual response shape empirically (see chat/TASKS.md, 2026-09-27) rather
+    actual response shape empirically (see FAILURES.md #17) rather
     than assuming content[0].text — the obvious guess was wrong."""
     for block in tool_result.content:
         resource = getattr(block, "resource", None)

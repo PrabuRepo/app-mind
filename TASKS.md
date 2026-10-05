@@ -59,8 +59,9 @@ consolidation now lives in `docs/documentation.md` §4.
 | Item | Status | Note |
 |---|---|---|
 | Full reorg (`guardrails/`, `agents/`, `rag/`, `mcp_clients/`, `memory/`, `llm_as_judge/`, `evals/`) | Complete | all test suites re-verified passing after the move |
-| `orderflow-app/` moved to `app/` layout | Complete | matches CLAUDE.md's expected path |
-| git — `orderflow-app/` | Complete | committed to its own GitHub repo |
+| `orderflow-app/` local checkout | **Removed** | Deleted from this repo (it was a gitignored standalone clone, verified clean and fully pushed first). The code is now read from the code index; see the Decisions log entry "Code knowledge index (Phase 1)" |
+| git — `orderflow-app/` | Complete | committed to its own GitHub repo (`PrabuRepo/orderflow-app`), the only place the sample application lives |
+| Code knowledge index: `indexer/` + `code_context/` | Complete (Phase 1) | A self-contained indexer project writes a SHA-pinned dependency graph and source files to Postgres; AppMind reads them through `code_context/`. Design and phases (2: multi-repo and docs, 3: automation, 4: split the indexer into its own repo) in `features/code-index-design.md` |
 | git — `app-mind/` (the rest: `app/`, `agents/`, `ingest/`, etc.) | Complete | initialized and committed to its own GitHub repo |
 | `llm_as_judge/` real implementation | Complete | `llm_as_judge/judge.py` is real and in active use by the eval harness, including its re-runs |
 | "One command to run everything" — full containerization (`Dockerfile`, `docker-entrypoint.py`, `app` service in `docker-compose.yml`) | Complete | Reverses the earlier "decided NOT to dockerize the UI/app tier" call below, now that the project is past submission and the earlier reasons (active development churn, not in scope yet) no longer apply. `docker compose up --build -d` boots all 4 containers; the app container auto-ingests into Qdrant on first boot only (checks point counts first, so a restart doesn't silently re-embed). README documents both this path and the original local-venv path side by side. See Decisions log for the auto-ingest design call and two real bugs found while building it |
@@ -543,6 +544,80 @@ not assume.
 3. Measure per-lookup latency for both and record it here.
 
 Sources: [github/github-mcp-server README](https://github.com/github/github-mcp-server).
+
+### Code knowledge index (Phase 1): local checkout removed
+Implements `features/code-index-design.md` Phase 0 and Phase 1. The goal: stop
+depending on a local copy of the target repository, so AppMind can support
+other teams' repositories without copying them in, and take repository access
+off the question-answering path.
+
+**What was built**
+- `indexer/` — a self-contained project (own README, `CONTRACT.md`, Dockerfile,
+  requirements, tests). For each repo in `targets.toml` it resolves a commit
+  SHA, downloads that commit as a tarball into a temp dir, builds the
+  dependency/call graph, and writes graph + source files to Postgres in one
+  transaction per repo. Unchanged commits are skipped; every run is audited.
+- `code_context/` — AppMind's read-only view of that store (the only AppMind
+  code that knows the data contract), including the query-side graph model.
+- `mcp_servers/ast_server.py` now loads a snapshot file; `mcp_servers/ast_graph.py`
+  was deleted (extraction moved into the indexer, queries into `code_context`).
+- `app/retrieval.py` reads source text from the index instead of GitHub; the
+  citation source is now `repo@sha7`. `ResearchPlan.use_github_tools` was
+  renamed `use_source_files`. A one-shot `indexer` service was added to
+  `docker-compose.yml`.
+
+**Verified, not assumed**
+- Phase 0 spike: GitHub's commit-SHA and tarball endpoints work with the
+  existing read-only PAT; the MCP SDK starts a stdio child with a restricted
+  environment (`get_default_environment() | server.env`), confirming that the
+  AST server must receive a snapshot file, not database credentials.
+- Parity with the old analyzer before it was deleted: the extractor's output
+  is identical (29 symbols, 7 import edges, 17 call edges, same order), and
+  116 query results (`get_dependents` and `get_callers`, both transitive modes,
+  every one of the 29 components) are identical, as are the error suggestions.
+- Tests all passing: the indexer suite (extractor, safe tarball extraction,
+  store atomicity and pruning against real Postgres, orchestration, registry),
+  `code_context` (graph, snapshots, failure modes), the AST server (14 checks
+  over a real stdio connection), `app.test_research_retriever` including the 4
+  fault-injection cases, and the agents/memory suites.
+- `code_context/test_boundaries.py` guards the indexer boundary (no imports in
+  either direction; the indexer imports only the standard library and its own
+  requirements). Proven to fail by planting three deliberate violations.
+- End to end through the containerized UI with `orderflow-app/` deleted: the
+  INC-1001 question cites `PrabuRepo/orderflow-app@244ea40 — app/payment_client.py`
+  (the retry bug), 0 retrieval errors, 0 ungrounded claims, no GitHub call.
+- The eval harness's impact-analysis ground truth works from the snapshot
+  (`APPMIND_EVAL_SNAPSHOT` pins it; the summary header records which one).
+
+**Measured effect.** Reading a cited file's source text: **~1,315 ms** (remote
+GitHub round trip, repeated on every Critic retry) → **~22 ms** (database
+read), medians of 5. The AST lookup is unchanged at **~1.36 s**: the cost is
+spawning the MCP server subprocess per lookup, not loading the graph. That is
+now the dominant retrieval cost and the obvious next optimization (a persistent
+server or an in-process provider).
+
+**Deviations from the design doc, and why**
+- The AST server's `--root` option was removed outright rather than kept for
+  development: parsing code no longer lives in AppMind. Its tests run on a
+  checked-in graph snapshot (`code_context/fixtures/orderflow_graph.json`,
+  produced by the indexer's extractor), not on a copy of the service source;
+  the sample source tree used to test the extractor lives inside `indexer/tests/`.
+- Docs/specs indexing and the `repo_docs` collection stay in Phase 2 (a `docs`
+  field in `targets.toml` is accepted and ignored with a notice).
+- `mcp_clients/github_client.py` and its live tests were kept as an optional
+  fallback but nothing on the default path calls it now.
+- Fixed in passing: the stale `test_research_retriever` assertion that claimed
+  only impact questions use the AST tools (incident questions deliberately do).
+
+**Not done, stated plainly**
+- The acceptance criterion "on clean volumes" was verified on the existing
+  volumes, not after `docker compose down -v`, because that would also wipe the
+  local audit trail and embeddings. Running it is a one-liner whenever wanted.
+- The full 27-run eval was not re-run on the snapshot (it costs real LLM calls);
+  only its ground-truth path was exercised.
+- Phase 2 (multi-repo, docs, de-hardcoding OrderFlow from the supervisor and
+  topic guardrail), Phase 3 (automation, GitHub App auth, freshness check) and
+  Phase 4 (splitting `indexer/` into its own repository) remain.
 
 ## Explicitly deferred (do not build now)
 

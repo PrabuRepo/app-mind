@@ -31,7 +31,9 @@ reason connected to the pipeline itself.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import os
 import re
 import statistics
 import time
@@ -41,15 +43,28 @@ from pathlib import Path
 
 from app.graph import build_graph
 from app.schemas import GraphState, PipelineMode
+from code_context import snapshots
 from evals.dataset import DATASET, GroundTruth
 from llm_as_judge.judge import RunOutcome, judge_run
-from mcp_servers.ast_graph import build_graph as build_ast_graph
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RUNS_PATH = RESULTS_DIR / "runs.jsonl"
 SUMMARY_PATH = RESULTS_DIR / "summary.md"
 
 GROUND_TRUTH_BY_ID: dict[str, GroundTruth] = {g.question_id: g for g in DATASET}
+
+
+@functools.lru_cache(maxsize=1)
+def _ground_truth_graph():
+    """The code snapshot every impact-analysis check is measured against.
+
+    Pin it with APPMIND_EVAL_SNAPSHOT=<commit sha> so ground truth cannot drift
+    when the code repository changes; unset (or "head") uses the current head
+    snapshot. The pipeline under test reads the head snapshot, so for a
+    comparison to be meaningful the pinned snapshot should be the head too —
+    the summary records which snapshot was used."""
+    meta = snapshots.resolve_snapshot(pin=os.environ.get("APPMIND_EVAL_SNAPSHOT"))
+    return meta, snapshots.load_graph(meta.id)
 
 
 # ===========================================================================
@@ -72,13 +87,13 @@ class ImpactCheck:
 
 
 def _expected_dependents(component: str) -> list[str]:
-    result = build_ast_graph().get_dependents(component)
+    result = _ground_truth_graph()[1].get_dependents(component)
     return sorted({module["module"].rsplit(".", 1)[-1] for module in result["dependent_modules"]})
 
 
 def _all_component_short_names() -> set[str]:
     names: set[str] = set()
-    for module in build_ast_graph().list_components()["modules"]:
+    for module in _ground_truth_graph()[1].list_components()["modules"]:
         names.add(module["module"].rsplit(".", 1)[-1])
         names.update(module["classes"].keys())
     return names
@@ -225,12 +240,23 @@ METRIC_LABELS = [
 MODE_ORDER = [m.value for m in PipelineMode]
 
 
+def _snapshot_line() -> str:
+    try:
+        meta, _ = _ground_truth_graph()
+    except Exception as exc:   # summary must still be written if the index is unreachable
+        return f"Code snapshot: unavailable ({type(exc).__name__}: {str(exc)[:120]})"
+    pinned = "pinned via APPMIND_EVAL_SNAPSHOT" if os.environ.get("APPMIND_EVAL_SNAPSHOT") else "current head"
+    return (f"Code snapshot: {meta.repo}@{meta.sha[:7]} (indexed "
+            f"{meta.indexed_at.isoformat(timespec='seconds')}, {pinned}) — impact-analysis ground truth")
+
+
 def write_summary_md(summary: dict[str, dict], error_handling_failures: list[str] | None) -> None:
     lines = [
         "# AppMind comparative eval — summary",
         "",
         f"Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')}Z",
         f"Dataset: {len(DATASET)} questions (see evals/dataset.py) x {len(MODE_ORDER)} pipeline_modes",
+        _snapshot_line(),
         "",
         "| Metric | " + " | ".join(MODE_ORDER) + " |",
         "|---|" + "---|" * len(MODE_ORDER),
@@ -254,10 +280,10 @@ def write_summary_md(summary: dict[str, dict], error_handling_failures: list[str
         "- Recall@K and escalation-accuracy metrics are not implemented (cut per CLAUDE.md's priority list).",
         "- The LLM judge is itself an LLM call with its own variance — its verdicts are a second "
         "opinion, not ground truth (same caution FAILURES.md #11 raised about the Critic itself).",
-        "- D1 (business_functional) cannot be verified against real code: GitHub MCP reads only "
-        "trigger for incident_rca questions. \"Correct\" there means appropriately uncertain given "
-        "the tools this system actually has, not omniscient. D2/B1/B6 (incident_rca) now DO get "
-        "real code via GitHub MCP (mcp_clients/github_client.py) — reflected in the numbers above.",
+        "- D1 (business_functional) cannot be verified against real code: source text is only "
+        "attached for incident_rca questions. \"Correct\" there means appropriately uncertain given "
+        "the tools this system actually has, not omniscient. D2/B1/B6 (incident_rca) DO get "
+        "real code, read from the code index (code_context/) — reflected in the numbers above.",
         "- 1 trial per (question, mode) — minimized for LLM-call cost on this capstone pass. A "
         "single run of a question won't re-surface the kind of variance FAILURES.md #11 found; "
         "add trials later (`--trials N`) if more coverage is needed.",

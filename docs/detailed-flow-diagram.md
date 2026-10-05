@@ -1,6 +1,6 @@
 # AppMind — Detailed Flow Diagram
 
-Node-by-node view of the LangGraph pipeline: exact routing, the `pipeline_mode` fork, the Critic retry loop, and the AST→GitHub tool-call sequencing. For the simplified component-category view, see [`documentation.md` §3](documentation.md#3-system-design--architecture).
+Node-by-node view of the LangGraph pipeline: exact routing, the `pipeline_mode` fork, the Critic retry loop, and how code evidence reaches the retriever from the code index. For the simplified component-category view, see [`detailed-design.md` §3](detailed-design.md#3-system-design--architecture).
 
 ### Component diagram
 
@@ -22,20 +22,25 @@ flowchart TB
         OG --> MW["memory_write"]
     end
 
-    subgraph knowledge["Knowledge and tools"]
+    subgraph knowledge["Knowledge and tools (read at question time)"]
         QDRANT[("Qdrant - docs + incidents")]
-        AST["Custom AST MCP server (local, offline)"]
-        GHMCP["GitHub MCP (remote, incident_rca only)"]
+        CTX["code_context (read-only client)"]
+        AST["Custom AST MCP server<br/>(loads a code snapshot)"]
     end
 
     subgraph storage["Storage"]
-        PG[("PostgreSQL - audit trail")]
+        PG[("PostgreSQL - audit trail<br/>+ code index: snapshots, files, heads")]
         REDIS[("Redis - investigation cache")]
+    end
+
+    subgraph indexing["Indexing (offline, separate project: indexer/)"]
+        GH["Target repositories (GitHub)"]
+        IDX["indexer<br/>pinned commit, graph + source files"]
     end
 
     subgraph offlineeval["Evaluation (offline, not live traffic)"]
         JUDGE["LLM-as-Judge"]
-        ASTCHECK["Deterministic AST check (Impact Analysis ground truth)"]
+        ASTCHECK["Deterministic graph check (Impact Analysis ground truth)"]
     end
 
     UI -->|"cache-checked"| REDIS
@@ -45,11 +50,17 @@ flowchart TB
     EVALH --> ASTCHECK
 
     RET --> QDRANT
+    RET --> CTX
     RET --> AST
-    AST -.->|"resolves file path"| GHMCP
+    CTX --> PG
+    CTX -.->|"exports the snapshot to a file"| AST
+    ASTCHECK -.->|"pinned snapshot"| CTX
+
+    GH --> IDX
+    IDX -->|"one transaction per repo"| PG
 
     MW --> PG
     MW --> REDIS
 ```
 
-*Solid arrows are direct calls; dotted arrows are the retry loop and the AST→GitHub file-path handoff. The Evaluation subgraph is offline tooling — it invokes the pipeline the same way the UI does, but is never part of a live request.*
+*Solid arrows are direct calls; dotted arrows are the retry loop and the snapshot hand-off to the AST server. Answering a question never contacts GitHub: the indexer (offline, run on demand or on a schedule) reads each repository once at a pinned commit and stores the result, and the retriever reads only that store. The Indexing and Evaluation subgraphs are offline tooling, never part of a live request; evaluation invokes the pipeline the same way the UI does.*

@@ -1,0 +1,9 @@
+# The registry: which repositories the indexer indexes. Identifiers only —
+# no repository content is ever stored here or anywhere in the AppMind repo.
+
+[[target]]
+repo        = "PrabuRepo/orderflow-app"   # owner/name on GitHub
+ref         = "main"                      # branch or tag; resolved to a commit SHA at index time
+source_root = "."                         # directory inside the repo holding the code to analyze
+exclude     = ["**/tests/**"]             # extra globs to skip (defaults already skip .venv, node_modules, ...)
+# docs      = ["README.md", "docs/**/*.md"]   # docs indexing arrives in phase 2

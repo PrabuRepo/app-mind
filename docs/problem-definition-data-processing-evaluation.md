@@ -44,8 +44,8 @@ Every item above is logged at the point it happened in `FAILURES.md` and `TASKS.
 |---|---|---|---|
 | `docs` | `knowledge-domains/docs/` | 3 files: architecture overview, business/functional requirements, operations runbook | RAG (Qdrant vector search) |
 | `incidents` | `knowledge-domains/incidents/` | 4 incident reports, each planting a *different* kind of investigative problem (see §3) | RAG (Qdrant vector search) |
-| Code (structure) | `orderflow-app/` | OrderFlow's Python source | Custom AST MCP server (local, static analysis) |
-| Code (real text) | `github.com/PrabuRepo/orderflow-app` | Same source, hosted | GitHub MCP server (remote, per-file fetch for citations) |
+| Code (structure) | `github.com/PrabuRepo/orderflow-app`, indexed to Postgres | OrderFlow's Python source: dependency/call graph | Custom AST MCP server over a code snapshot (static analysis done ahead of time by the `indexer/` project) |
+| Code (real text) | Same snapshot (`code_files`) | The source files, verbatim, tagged with the commit SHA | Read from the code index for citations; no repository access at question time |
 
 Code is deliberately **not** embedded into the vector store — a dedicated architectural decision, not an oversight. Cross-file dependency analysis needs every file parsed together, not fetched one-at-a-time, and an embedded snapshot of code goes silently stale the moment the code changes — exactly the kind of false confidence this project exists to catch.
 

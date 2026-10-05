@@ -1,0 +1,486 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:appmind:schema:app-profile:v1",
+  "title": "AppMind application profile",
+  "description": "Describes ONE application onboarded to AppMind: what it covers, where its knowledge lives, and how questions about it are answered. Only app, scope and sources.code are required; everything else has a sensible default. Unknown keys are errors, so a typo is caught instead of silently ignored. Secrets are never stored here, only the NAMES of environment variables that hold them. Rules JSON Schema cannot express (unique ids, exactly one default persona, components referencing existing components, alias targets existing in the code graph) are checked by the validator in code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "app", "scope", "sources"],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of this schema. Changes only for a breaking change."
+    },
+    "extends": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional base profile (for example an organization-wide one) whose values this profile overrides."
+    },
+
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "description": "Identity and ownership.",
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier", "description": "Stable machine id, used in storage names and logs." },
+        "name": { "type": "string", "minLength": 1, "description": "Display name, used in prompts and the UI." },
+        "description": { "type": "string" },
+        "owners": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "description": "Teams or people to contact about this app." },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description"],
+      "description": "What the application covers. Drives the off-topic guardrail and question understanding.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 40,
+          "description": "Prose describing the application's domain and vocabulary. The input guardrail embeds this and compares each question to it, so write it the way a question about the app would sound."
+        },
+        "out_of_scope": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Topics that are explicitly NOT covered." },
+        "aliases": {
+          "type": "object",
+          "description": "Business words mapped to code components, e.g. PaymentClient: [payment, charge]. Replaces hardcoded keyword maps.",
+          "additionalProperties": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true }
+        },
+        "glossary": {
+          "type": "object",
+          "description": "Domain terms and their meaning, supplied to prompts.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "description": "Where the application's knowledge lives. Every source carries its own refresh policy, auth and classification.",
+      "properties": {
+        "code": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/codeSource" }, "description": "Code repositories, indexed into a dependency graph and source files." },
+        "docs": { "type": "array", "items": { "$ref": "#/$defs/documentSource" }, "description": "Architecture, requirements, runbooks." },
+        "incidents": { "type": "array", "items": { "$ref": "#/$defs/documentSource" }, "description": "Postmortems or an incident-tracker query." },
+        "specs": { "type": "array", "items": { "$ref": "#/$defs/documentSource" }, "description": "ADRs, design and specification files (for example spec-driven development outputs), OpenAPI." },
+        "other": { "type": "array", "items": { "$ref": "#/$defs/documentSource" }, "description": "Tickets, wikis and other connectors." }
+      }
+    },
+
+    "components": {
+      "type": "array",
+      "description": "Optional architecture map of the application's components or services.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "description": { "type": "string" },
+          "repo": { "$ref": "#/$defs/repoName", "description": "Repository this component lives in (must be one of sources.code)." },
+          "owner": { "type": "string" },
+          "criticality": { "enum": ["low", "medium", "high", "critical"] },
+          "depends_on": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }
+        }
+      }
+    },
+
+    "links": {
+      "type": "array",
+      "description": "Declared connections between components or services that static analysis cannot see (HTTP, queues, events).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "via"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "via": { "enum": ["http", "grpc", "queue", "event", "database", "file", "other"] },
+          "description": { "type": "string" }
+        }
+      }
+    },
+
+    "question_types": {
+      "type": "object",
+      "description": "Which kinds of question are answered and how. Keys are question-type names (the built-in ones are business_functional, incident_rca and impact_analysis); each type chooses its own sources and code tools.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/questionType" }
+    },
+
+    "personas": {
+      "type": "array",
+      "description": "Perspectives answers can be tailored to (for example product, developer, operations).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "source_weights": {
+            "type": "object",
+            "description": "Relative importance of each source group for this persona (0 = ignore, 1 = highest).",
+            "propertyNames": { "enum": ["docs", "incidents", "specs", "code", "other"] },
+            "additionalProperties": { "$ref": "#/$defs/score" }
+          },
+          "answer_style": { "type": "string", "description": "How answers should read for this audience." },
+          "default": { "type": "boolean", "default": false }
+        }
+      }
+    },
+
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Retrieval tuning. Advanced: defaults are measured values for the reference application.",
+      "properties": {
+        "min_score": { "$ref": "#/$defs/score", "default": 0.25, "description": "Chunks scoring below this cosine similarity are dropped, so an off-topic question yields empty retrieval rather than the least-bad chunks. Re-measure when the corpus or embedding model changes." },
+        "retry_extra_top_k": { "type": "integer", "minimum": 0, "maximum": 20, "default": 3, "description": "Extra chunks per collection on each Critic-triggered retry." },
+        "max_source_files": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3, "description": "Cap on source files attached to one question's evidence." },
+        "max_components": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3, "description": "Cap on components looked up when a question names several." },
+        "min_component_name_length": { "type": "integer", "minimum": 2, "maximum": 20, "default": 6, "description": "Shorter names (such as 'api') are ignored when matching a question to components, since they match everywhere." }
+      }
+    },
+
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How confidence is judged and when the system escalates to a human instead of answering.",
+      "properties": {
+        "escalate_below": { "$ref": "#/$defs/score", "default": 0.5, "description": "Confidence below this escalates." },
+        "flag_penalty": { "$ref": "#/$defs/score", "default": 0.3, "description": "Confidence lost per unresolved critique flag." },
+        "error_cap": { "$ref": "#/$defs/score", "default": 0.4, "description": "Maximum confidence when any retrieval or agent step failed. Keep below escalate_below." },
+        "max_retries": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2, "description": "Critic-triggered re-research attempts. Each one costs tokens and latency." },
+        "critic": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "strictness": { "enum": ["lenient", "standard", "strict"], "default": "standard" }
+          }
+        },
+        "grounding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fuzzy_min": { "$ref": "#/$defs/score", "description": "Minimum similarity for a quote to count as found in its source." }
+          }
+        }
+      }
+    },
+
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who is told, and how, when the system declines to answer.",
+      "properties": {
+        "contacts": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "People, teams or channels." },
+        "channel": { "type": "string", "description": "Where escalations are posted." },
+        "message": { "type": "string", "description": "Text shown to the user when escalating." }
+      }
+    },
+
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pii": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "builtin": { "type": "array", "items": { "enum": ["email", "phone", "ssn"] }, "uniqueItems": true, "description": "Built-in detectors." },
+            "custom": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "regex"],
+                "properties": { "name": { "type": "string", "minLength": 1 }, "regex": { "type": "string", "minLength": 1 } }
+              }
+            },
+            "action": { "enum": ["block", "redact"], "default": "block" }
+          }
+        },
+        "topic": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "threshold": { "$ref": "#/$defs/score", "default": 0.18, "description": "Questions scoring below this similarity to scope.description are blocked. Measure it against real on-topic and off-topic questions." }
+          }
+        },
+        "blocked_topics": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "require_citations": { "type": "boolean", "default": true } }
+        }
+      }
+    },
+
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "llm": { "type": "string", "minLength": 1, "description": "Default chat model." },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-role overrides of the default chat model.",
+          "properties": {
+            "evidence": { "type": "string", "minLength": 1 },
+            "critic": { "type": "string", "minLength": 1 },
+            "synthesis": { "type": "string", "minLength": 1 },
+            "judge": { "type": "string", "minLength": 1 }
+          }
+        },
+        "embedding": { "type": "string", "minLength": 1, "description": "Embedding model. Changing it requires re-indexing every source." },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 60 },
+        "max_output_tokens": { "type": "integer", "minimum": 1, "default": 3000 }
+      }
+    },
+
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_tokens_per_question": { "type": "integer", "minimum": 1 },
+        "max_llm_calls_per_question": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "indexing": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How and when sources are (re)indexed.",
+      "properties": {
+        "trigger": { "enum": ["manual", "webhook", "schedule"], "default": "manual" },
+        "schedule": { "type": "string", "minLength": 1, "description": "Cron expression. Required when trigger is 'schedule'." },
+        "retention": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Snapshots kept per repository, besides the current head and pinned ones." },
+        "max_file_bytes": { "type": "integer", "minimum": 1000, "maximum": 5000000, "default": 200000 },
+        "languages": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "freshness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "warn_after": { "$ref": "#/$defs/duration", "description": "Mention in the answer when the index is older than this." } }
+        }
+      },
+      "if": { "properties": { "trigger": { "const": "schedule" } }, "required": ["trigger"] },
+      "then": { "required": ["schedule"] }
+    },
+
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,30}$", "description": "Prefix for this app's collections and tables, so one app's data never mixes with another's." },
+        "cache_ttl": { "$ref": "#/$defs/duration", "default": "24h" },
+        "audit_retention": { "oneOf": [ { "$ref": "#/$defs/duration" }, { "const": "forever" } ], "default": "forever" },
+        "store_questions": { "type": "boolean", "default": true, "description": "Set false to keep question text out of the audit trail." }
+      }
+    },
+
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_groups": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Who may ask questions about this app." },
+        "repo_acl_mapping": { "type": "boolean", "default": false, "description": "Enforce each repository's own access rules on answers derived from it." },
+        "data_classification": { "$ref": "#/$defs/classification" },
+        "audit": { "type": "boolean", "default": true }
+      }
+    },
+
+    "eval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dataset": { "type": "string", "minLength": 1, "description": "Path to the questions and ground truth used to measure this app." },
+        "trials": { "type": "integer", "minimum": 1, "maximum": 20, "default": 1 },
+        "metrics": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/metric" }
+        },
+        "pin_snapshot": { "type": "string", "pattern": "^(head|[0-9a-f]{7,40})$", "default": "head", "description": "Commit SHA (or 'head') the impact-analysis ground truth is measured against." },
+        "thresholds": {
+          "type": "object",
+          "description": "Minimum (or maximum, for rates and cost) acceptable value per metric, for alerts.",
+          "propertyNames": { "$ref": "#/$defs/metric" },
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "log_level": { "enum": ["debug", "info", "warning", "error"], "default": "info" },
+        "trace": { "type": "boolean", "default": true, "description": "Print the per-question node and LLM-call trace." }
+      }
+    },
+
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "example_questions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "locale": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$" }
+      }
+    },
+
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Declares which environment variables must be set. Values never appear in this file.",
+      "properties": {
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/envVarName" },
+          "description": "Checked at startup so a missing secret fails fast with a clear message."
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,40}$" },
+    "repoName": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "owner/name" },
+    "envVarName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "duration": { "type": "string", "pattern": "^[0-9]+(s|m|h|d|w)$", "description": "A number and a unit: 30m, 24h, 7d, 2w." },
+    "classification": { "enum": ["public", "internal", "confidential", "restricted"] },
+    "metric": {
+      "enum": ["false_confidence", "error_catch", "citation_accuracy", "citation_grounding", "impact_recall", "escalation_rate", "cost", "latency"]
+    },
+
+    "secretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secret"],
+      "description": "A reference to a secret, never the secret itself.",
+      "properties": {
+        "secret": { "$ref": "#/$defs/envVarName", "description": "NAME of the environment variable that holds the secret." }
+      }
+    },
+
+    "refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trigger": { "enum": ["manual", "webhook", "schedule"] },
+        "schedule": { "type": "string", "minLength": 1, "description": "Cron expression; required when trigger is 'schedule'." }
+      },
+      "if": { "properties": { "trigger": { "const": "schedule" } }, "required": ["trigger"] },
+      "then": { "required": ["schedule"] }
+    },
+
+    "sourceCommon": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "include": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "description": "Glob patterns to include." },
+        "exclude": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "description": "Glob patterns to skip." },
+        "auth": { "$ref": "#/$defs/secretRef" },
+        "refresh": { "$ref": "#/$defs/refresh" },
+        "classification": { "$ref": "#/$defs/classification" }
+      }
+    },
+
+    "codeSource": {
+      "type": "object",
+      "allOf": [ { "$ref": "#/$defs/sourceCommon" } ],
+      "required": ["repo"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/repoName" },
+        "host": { "type": "string", "minLength": 1, "default": "github.com" },
+        "ref": { "type": "string", "minLength": 1, "default": "main", "description": "Branch or tag; resolved to an immutable commit SHA at index time." },
+        "source_root": {
+          "type": "string",
+          "default": ".",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).*$",
+          "description": "Directory inside the repo that holds the code to analyze (e.g. 'src'). Must be relative and stay inside the repo."
+        },
+        "language": { "enum": ["python", "java", "typescript", "javascript", "go", "csharp", "other"], "default": "python", "description": "Only Python has an extractor today." },
+        "manifest": { "type": "string", "default": "appmind.yaml", "description": "Optional self-description file inside the repo, merged over this entry." }
+      },
+      "unevaluatedProperties": false
+    },
+
+    "documentSource": {
+      "type": "object",
+      "allOf": [ { "$ref": "#/$defs/sourceCommon" } ],
+      "properties": {
+        "kind": { "enum": ["architecture", "requirements", "runbook", "incident", "adr", "spec", "api", "ticket", "wiki", "other"] },
+        "format": { "enum": ["markdown", "text", "html", "openapi"], "default": "markdown" },
+        "path": { "type": "string", "minLength": 1, "description": "A local path (a file or folder)." },
+        "repo": { "$ref": "#/$defs/repoName" },
+        "ref": { "type": "string", "minLength": 1 },
+        "paths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "Glob patterns inside the repo." },
+        "connector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "description": "An external system (issue tracker, wiki, ...).",
+          "properties": {
+            "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "url": { "type": "string", "format": "uri" },
+            "query": { "type": "string" }
+          }
+        }
+      },
+      "oneOf": [
+        { "required": ["path"] },
+        { "required": ["repo", "paths"] },
+        { "required": ["connector"] }
+      ],
+      "unevaluatedProperties": false
+    },
+
+    "questionType": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": "string" },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["docs", "incidents", "specs", "code", "other"] },
+          "description": "Source groups this type draws on."
+        },
+        "top_k": {
+          "type": "object",
+          "description": "Chunks retrieved from each searched source group.",
+          "propertyNames": { "enum": ["docs", "incidents", "specs", "other"] },
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 50 }
+        },
+        "use_code_graph": { "type": "boolean", "description": "Look up dependents/callers in the code graph." },
+        "attach_source_files": { "type": "boolean", "description": "Also attach the real source text of the components the graph lookup resolved (requires use_code_graph)." },
+        "classifier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["keywords", "llm"], "default": "keywords" },
+            "keywords": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true },
+            "prompt": { "type": "string" }
+          },
+          "if": { "properties": { "mode": { "const": "keywords" } }, "required": ["mode"] },
+          "then": { "required": ["keywords"] }
+        },
+        "personas": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }
+      },
+      "if": { "properties": { "attach_source_files": { "const": true } }, "required": ["attach_source_files"] },
+      "then": { "properties": { "use_code_graph": { "const": true } }, "required": ["use_code_graph"] }
+    }
+  }
+}
