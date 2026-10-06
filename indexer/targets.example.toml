@@ -1,4 +1,9 @@
-# The registry: which repositories the indexer indexes. Identifiers only —
+# Example registry: which repositories the indexer indexes. Copy it to
+# `targets.toml` (the file the indexer reads by default) and edit. Inside the
+# AppMind repo `targets.toml` is generated from the application profile
+# instead (python -m app_profile.export_targets), so do not hand-write it there.
+#
+# Identifiers only —
 # no repository content is ever stored here or anywhere in the AppMind repo.
 
 [[target]]

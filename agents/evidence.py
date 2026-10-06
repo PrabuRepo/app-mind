@@ -44,7 +44,7 @@ class EvidenceExtraction(BaseModel):
 
 EVIDENCE_INSTRUCTIONS = """\
 You are the Evidence agent in a system that investigates questions about one \
-software application (OrderFlow). You are given a question and numbered source \
+software application ({app_name}). You are given a question and numbered source \
 chunks. Extract the factual claims in the chunks that bear on the question.
 
 Rules:

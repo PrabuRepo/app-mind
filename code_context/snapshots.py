@@ -32,6 +32,7 @@ from code_context.contract import (
     NoSnapshot,
     UnsupportedSchemaVersion,
 )
+from app_profile.registry import select_profile
 from code_context.graph import CodeGraph
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -99,18 +100,14 @@ def _meta(row: tuple) -> SnapshotMeta:
 
 
 def target_repo() -> str:
-    """Which repository questions are about: APPMIND_CODE_REPO, else the only
-    indexed repository. (Phase 2 resolves this per question instead.)"""
+    """Which repository questions are about: APPMIND_CODE_REPO if set (an
+    override), else the first code repository in the application profile.
+    (Phase 2 resolves this per question instead.)"""
     load_dotenv()
     configured = os.environ.get("APPMIND_CODE_REPO")
     if configured:
         return configured
-    repos = [r[0] for r in _query("SELECT repo FROM code_heads ORDER BY repo")]
-    if not repos:
-        raise NoSnapshot("no repository has been indexed yet; run the indexer")
-    if len(repos) > 1:
-        raise NoSnapshot(f"several repositories are indexed ({', '.join(repos)}); set APPMIND_CODE_REPO")
-    return repos[0]
+    return select_profile().sources.code[0].repo
 
 
 def get_head(repo: str | None = None) -> SnapshotMeta:

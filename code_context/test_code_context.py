@@ -175,6 +175,10 @@ def test_snapshots(data: dict) -> None:
         check("an unreachable database is IndexUnavailable", raises(IndexUnavailable, snapshots.get_head, "o/r"))
     with patch.dict(os.environ, {"APPMIND_CODE_REPO": "configured/repo"}):
         check("APPMIND_CODE_REPO selects the target repo", snapshots.target_repo() == "configured/repo")
+    unset = {k: v for k, v in os.environ.items() if k != "APPMIND_CODE_REPO"}
+    with patch.dict(os.environ, unset, clear=True), patch.object(snapshots, "load_dotenv", lambda: None):
+        check("without the override, the target repo is the application profile's first code repo",
+              snapshots.target_repo() == "PrabuRepo/orderflow-app", snapshots.target_repo())
 
 
 def main() -> int:

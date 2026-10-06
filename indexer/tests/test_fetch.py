@@ -16,7 +16,7 @@ import httpx
 
 from appmind_indexer import config, fetch
 from appmind_indexer.registry import load_targets
-from tests.helpers import Checker
+from tests.helpers import EXAMPLE_TARGETS, Checker
 
 
 def _tar(entries) -> bytes:
@@ -115,7 +115,7 @@ def main() -> int:
     except RuntimeError:
         print("  SKIP  no GITHUB_TOKEN available")
     else:
-        target = load_targets()[0]
+        target = load_targets(EXAMPLE_TARGETS)[0]
         sha = fetch.resolve_sha(target.repo, target.ref, token)
         check("live: resolves to a 40-char SHA", len(sha) == 40, sha)
         with tempfile.TemporaryDirectory() as tmp:

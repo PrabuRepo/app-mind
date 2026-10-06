@@ -28,7 +28,7 @@ The goal: **remove the dependency on a local checkout, keep the deterministic co
 | 5 | **Eval determinism depends on mutable code.** Ground truth is computed from whatever is on disk. | `evals/run_eval.py:75,81` call `build_ast_graph()` on the default root |
 | 6 | **Not deployable as a platform.** The Docker image bakes the clone in via `COPY . .` (not excluded by `.dockerignore`). | `Dockerfile` |
 | 7 | **Ingestion cannot hold more than one corpus.** Qdrant point ids are the loop index, so a second source sharing a collection would overwrite the first. | `ingest/run_ingestion.py:132-139` (`id=idx`) |
-| 8 | **OrderFlow is hardcoded in several places.** | supervisor keyword → component map in `app/graph.py`; `TOPIC_DESCRIPTION` in `guardrails/input_guardrail.py`; server name/instructions in `mcp_servers/ast_server.py:38-49` |
+| 8 | **OrderFlow is hardcoded in several places.** (Resolved by the application profile, [`features/appmind-config/`](../appmind-config/app-config-design.md).) | supervisor keyword → component map in `app/graph.py`; `TOPIC_DESCRIPTION` in `guardrails/input_guardrail.py`; server name/instructions in `mcp_servers/ast_server.py:38-49` |
 | 9 | **Extraction and querying are fused in one class**, so the analyzer cannot be separated from the query model. | `mcp_servers/ast_graph.py`: `CodeGraph` holds the build passes (`_index_*`) and the queries (`resolve`, `get_dependents`, `get_callers`) together |
 
 ---
@@ -357,7 +357,7 @@ The AST server runs as an MCP stdio subprocess. The MCP SDK starts such a child 
 
 ### 6.6 Registry and manifest
 
-`indexer/targets.toml` (committed; identifiers only):
+`indexer/targets.toml` (inside the AppMind repo this file is generated from the application profile by `python -m app_profile.export_targets` and git-ignored; `indexer/targets.example.toml` is the committed example; identifiers only):
 
 ```toml
 [[target]]

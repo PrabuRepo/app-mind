@@ -44,13 +44,14 @@ One line each, linking to the folder:
 | [`code_context/`](code_context/) | AppMind's read-only view of the code knowledge store: reads snapshots, checks their schema version, and rebuilds the dependency graph to answer questions. The only AppMind code that knows the indexer's data contract. |
 | [`indexer/`](indexer/) | A **self-contained project** (own README, Dockerfile, requirements, tests) that turns configured GitHub repositories into the code knowledge store: dependency graph and source files in Postgres, tagged with the commit SHA. It imports nothing from AppMind; see [`indexer/CONTRACT.md`](indexer/CONTRACT.md). Built to move to its own repository. |
 | [`memory/`](memory/) | The Postgres audit trail (one row per investigation) and the Redis investigation-lookup cache. |
+| [`app_profile/`](app_profile/) | The **application profile**: one YAML file per application ([`config/apps/`](config/apps/)) saying who it is and where its knowledge lives (code repositories, docs, incidents, an optional topic description and component aliases). A strict loader and schema validate it; ingestion, the topic guardrail, the supervisor and the indexer all read it, so onboarding an application is a new file, not a code change. |
 | [`ingest/`](ingest/) | Chunks, embeds, and loads the `knowledge-domains/` corpus into Qdrant. |
 | [`knowledge-domains/`](knowledge-domains/) | The RAG corpus itself — OrderFlow's docs and incident reports, each incident planting a different kind of investigative trap. |
 | [`evals/`](evals/) | The comparative eval harness: the 9-question dataset, the runner, and the results. |
 | [`llm_as_judge/`](llm_as_judge/) | The LLM-as-judge used by the eval harness to score subjective questions. |
 | [`ui/`](ui/) | The Streamlit front end. |
 | [`docs/`](docs/) | Submission documentation: the approved design doc, the full documentation, a focused 3-topic summary, and the detailed pipeline diagram. |
-| [`features/`](features/) | Design documents for features beyond the submitted scope, e.g. [`code-index-design.md`](features/code-index-design.md) (the code knowledge index). |
+| [`features/`](features/) | Design documents for features beyond the submitted scope: [`code-index-design.md`](features/code-index/code-index-design.md) (the code knowledge index) and [`appmind-config/`](features/appmind-config/) (the application profile: design and an annotated example; implemented in `app_profile/`). |
 
 **The target application.** AppMind investigates **OrderFlow**, a synthetic order-processing service that lives in its own repository, [`PrabuRepo/orderflow-app`](https://github.com/PrabuRepo/orderflow-app) (it includes one intentionally planted bug). It is **not** copied into this repository: the indexer reads it from GitHub and stores the derived knowledge.
 | [`setup-files/`](setup-files/) | Earlier setup notes — **stale**, written before the build diverged from the original plan (a different tech stack, different file layout). Use this README instead. |
@@ -96,10 +97,11 @@ python -m ingest.run_ingestion
 
 # 6. Index the target repository's code (dependency graph + source files) into Postgres
 pip install -r indexer/requirements.txt     # the indexer has its own requirements
+python -m app_profile.export_targets        # write indexer/targets.toml from config/apps/<id>.yaml
 cd indexer && python -m appmind_indexer.run && cd ..
 ```
 
-The indexer reads the repositories listed in [`indexer/targets.toml`](indexer/targets.toml) from GitHub, pinned to a commit, and stores the result; re-running it skips repositories that haven't changed. Until it has run once, questions that need code (impact analysis, incident root cause) escalate with a clear "no code snapshot — run the indexer" message instead of guessing. See [`indexer/README.md`](indexer/README.md).
+The indexer reads the code repositories listed in the application profile ([`config/apps/orderflow.yaml`](config/apps/orderflow.yaml), exported to the indexer as a generated `indexer/targets.toml`) from GitHub, pinned to a commit, and stores the result; re-running it skips repositories that haven't changed. Until it has run once, questions that need code (impact analysis, incident root cause) escalate with a clear "no code snapshot — run the indexer" message instead of guessing. See [`indexer/README.md`](indexer/README.md).
 
 ## Running it, fully containerized (one command)
 
@@ -172,6 +174,14 @@ python -m agents.test_critic
 python -m mcp_servers.test_ast_server
 python -m code_context.test_code_context     # needs the Postgres container
 python -m code_context.test_boundaries       # guards the indexer / AppMind import boundary
+python -m app_profile.test_app_profile        # application profile schema, loader and checks (no services needed)
+python -m app_profile.test_orderflow_profile  # config/apps/orderflow.yaml matches today's hardcoded values
+python -m app_profile.check                   # validate every profile under config/apps/
+python -m ingest.test_ingestion_profile       # ingestion takes its folders from the profile (no services needed)
+python -m app.test_prompts                    # agent prompts name the app from the profile (no API key needed)
+python -m app.test_component_hints            # scope.aliases drive the supervisor component hint (no services needed)
+python -m app_profile.test_export_targets      # profile -> indexer registry hand-off (no services needed)
+python -m guardrails.test_input_guardrail_profile  # topic check takes its reference text from the profile (no API key needed)
 python -m mcp_clients.test_github_client     # optional GitHub client; live, needs GITHUB_TOKEN
 python -m memory.test_db
 python -m memory.test_cache

@@ -18,8 +18,14 @@ a normal database — we use two collections, `docs` and `incidents`, kept
 separate on purpose (see your one-pager's differentiator: per-domain
 indexes, not one flat bucket).
 
+WHERE THE FOLDERS COME FROM:
+The application profile (config/apps/<id>.yaml, see app_profile/) lists the
+docs and incident locations under `sources.docs` / `sources.incidents`. Each
+of those two groups is loaded into the Qdrant collection of the same name.
+
 RUNNING THIS SCRIPT:
-    python -m ingest.run_ingestion
+    python -m ingest.run_ingestion            # embed and load into Qdrant
+    python -m ingest.run_ingestion --dry-run  # chunk only: print counts, no API or Qdrant calls
 Requires: your .env file filled in with a real OPENAI_API_KEY, and your
 Docker Qdrant container already running (confirmed via `docker ps`).
 """
@@ -28,12 +34,15 @@ from __future__ import annotations
 
 import os
 import pathlib
+import sys
 
 from dotenv import load_dotenv
 from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
+from app_profile import AppProfile, ProfileError
+from app_profile.registry import PROJECT_ROOT, select_profile
 from ingest.chunker import Chunk, chunk_markdown
 
 # text-embedding-3-small always produces vectors of exactly this length.
@@ -42,13 +51,30 @@ from ingest.chunker import Chunk, chunk_markdown
 EMBEDDING_DIMENSIONS = 1536
 EMBEDDING_MODEL = "text-embedding-3-small"
 
-# Maps each knowledge domain to its own folder AND its own Qdrant collection
-# name. Adding a third domain later (if you ever revisit that decision) is
-# just one more line here — nothing else in this script needs to change.
-DOMAIN_FOLDERS = {
-    "docs": "knowledge-domains/docs",
-    "incidents": "knowledge-domains/incidents",
-}
+# The two RAG domains. Each is a `sources` group in the application profile AND
+# the name of its own Qdrant collection (collection names stay fixed; see
+# features/appmind-config/app-config-design.md, decision 4).
+DOMAINS = ("docs", "incidents")
+
+
+def domain_paths(profile: AppProfile, base_dir: pathlib.Path = PROJECT_ROOT) -> dict[str, list[pathlib.Path]]:
+    """Domain -> the local files/folders the profile lists for it, resolved
+    against `base_dir`. Several entries for one domain end up in one collection.
+
+    A source given as a repository (`repo` + `paths`) is not supported by
+    ingestion yet: failing loudly beats silently ingesting nothing."""
+    result: dict[str, list[pathlib.Path]] = {}
+    for domain in DOMAINS:
+        paths = []
+        for entry in getattr(profile.sources, domain):
+            if entry.path is None:
+                raise ProfileError(
+                    f"sources.{domain}: repository sources ({entry.repo}) are not supported by ingestion yet; "
+                    "use a local `path`"
+                )
+            paths.append(base_dir / entry.path)
+        result[domain] = paths
+    return result
 
 
 def load_env_and_clients() -> tuple[OpenAI, QdrantClient]:
@@ -102,24 +128,32 @@ def embed_chunks(openai_client: OpenAI, chunks: list[Chunk]) -> list[list[float]
     return [item.embedding for item in response.data]
 
 
-def load_domain(openai_client: OpenAI, qdrant_client: QdrantClient, domain: str, folder: str) -> int:
+def collect_chunks(locations: list[pathlib.Path]) -> list[Chunk]:
+    """Chunk every .md file in the given folders (or the given .md files), in a
+    stable order. Needs no network, so it is also what --dry-run uses."""
+    all_chunks: list[Chunk] = []
+    for location in locations:
+        md_files = [location] if location.is_file() else sorted(location.glob("*.md"))
+        for md_file in md_files:
+            # Source files are UTF-8; without an explicit encoding, Windows
+            # defaults to cp1252 and mangles em dashes etc. before embedding.
+            text = md_file.read_text(encoding="utf-8")
+            all_chunks.extend(chunk_markdown(text, source=md_file.name))
+    return all_chunks
+
+
+def load_domain(openai_client: OpenAI, qdrant_client: QdrantClient, domain: str, locations: list[pathlib.Path]) -> int:
     """
-    Processes every .md file in one domain's folder end to end: chunk,
+    Processes every .md file in one domain's locations end to end: chunk,
     embed, upsert into that domain's Qdrant collection. Returns the total
     number of chunks loaded, so the caller can print a useful summary.
     """
     ensure_collection(qdrant_client, domain)
 
-    folder_path = pathlib.Path(folder)
-    all_chunks: list[Chunk] = []
-    for md_file in sorted(folder_path.glob("*.md")):
-        # Source files are UTF-8; without an explicit encoding, Windows
-        # defaults to cp1252 and mangles em dashes etc. before embedding.
-        text = md_file.read_text(encoding="utf-8")
-        all_chunks.extend(chunk_markdown(text, source=md_file.name))
+    all_chunks = collect_chunks(locations)
 
     if not all_chunks:
-        print(f"[ingest] WARNING: no chunks found in {folder} — check the path is correct")
+        print(f"[ingest] WARNING: no chunks found in {', '.join(map(str, locations))} — check the path is correct")
         return 0
 
     vectors = embed_chunks(openai_client, all_chunks)
@@ -143,12 +177,22 @@ def load_domain(openai_client: OpenAI, qdrant_client: QdrantClient, domain: str,
     return len(points)
 
 
-def main():
+def main(argv: list[str] | None = None):
+    argv = sys.argv[1:] if argv is None else argv
+    profile = select_profile()
+    sources = domain_paths(profile)
+    print(f"[ingest] application profile: {profile.app.id}")
+
+    if "--dry-run" in argv:
+        for domain, locations in sources.items():
+            print(f"[dry-run] {domain}: {len(collect_chunks(locations))} chunk(s)")
+        return
+
     openai_client, qdrant_client = load_env_and_clients()
     total = 0
-    for domain, folder in DOMAIN_FOLDERS.items():
-        total += load_domain(openai_client, qdrant_client, domain, folder)
-    print(f"\nDone. {total} total chunk(s) loaded across {len(DOMAIN_FOLDERS)} collection(s).")
+    for domain, locations in sources.items():
+        total += load_domain(openai_client, qdrant_client, domain, locations)
+    print(f"\nDone. {total} total chunk(s) loaded across {len(sources)} collection(s).")
 
 
 if __name__ == "__main__":

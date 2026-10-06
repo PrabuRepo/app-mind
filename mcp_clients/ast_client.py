@@ -67,7 +67,7 @@ def _normalize(text: str) -> str:
 
 
 def _mentioned_components(question: str, component_listing: dict) -> list[str]:
-    """Which OrderFlow components does the question name? Matched against the
+    """Which of the application's components does the question name? Matched against the
     server's own list_components() output (so there are no hardcoded names
     here), ignoring case and spacing: "PaymentClient", "payment client" and
     "payment_client" all match. Returned in the order they appear."""

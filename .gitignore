@@ -218,3 +218,6 @@ __marimo__/
 .streamlit/secrets.toml
 bkp/*
 capstone-eval-metrics.png
+
+# Generated from config/apps/<id>.yaml by python -m app_profile.export_targets
+indexer/targets.toml

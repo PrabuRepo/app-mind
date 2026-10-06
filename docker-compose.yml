@@ -58,16 +58,36 @@ services:
     ports:
       - "8501:8501"
 
-  # One-shot: indexes the repositories in indexer/targets.toml into Postgres,
+  # One-shot: writes the indexer's registry (targets.toml) from the application
+  # profile, config/apps/<id>.yaml, into a shared volume, then exits. It uses
+  # the app image because the profile loader lives there; the indexer itself
+  # stays free of AppMind code and just reads the generated file.
+  export-targets:
+    build: .
+    container_name: appmind-export-targets
+    restart: "no"
+    entrypoint: ["python", "-m", "app_profile.export_targets"]
+    command: ["--out", "/generated/targets.toml"]
+    volumes:
+      - appmind_generated:/generated
+
+  # One-shot: indexes the repositories in the generated registry into Postgres,
   # then exits. Built from ./indexer alone (it contains no AppMind code) and
   # given only the variables it needs, not the whole .env. The app does not
   # wait on it. Refresh manually with: docker compose run --rm indexer
+  # (the registry is regenerated from the profile first, every time).
   indexer:
     build: ./indexer
     container_name: appmind-indexer
     restart: "no"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_started
+      export-targets:
+        condition: service_completed_successfully
+    command: ["--targets", "/generated/targets.toml"]
+    volumes:
+      - appmind_generated:/generated:ro
     environment:
       POSTGRES_HOST: postgres
       GITHUB_TOKEN: ${GITHUB_TOKEN}
@@ -76,3 +96,4 @@ volumes:
   appmind_pg_data:
   appmind_qdrant_data:
   appmind_redis_data:
+  appmind_generated:

@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 JUDGE_INSTRUCTIONS = """\
 You are a judge scoring one answer from a system that investigates questions \
-about a software application (OrderFlow). You are given the question, a \
+about a software application ({app_name}). You are given the question, a \
 rubric for what a correct answer looks like, and the system's actual answer \
 plus the citations it used. You do not answer the question yourself — you \
 score what was already produced.

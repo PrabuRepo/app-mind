@@ -27,6 +27,7 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
+from app.prompts import render_prompt
 from ingest.run_ingestion import load_env_and_clients
 
 DEFAULT_MODEL = "gpt-5.4-mini"
@@ -54,12 +55,17 @@ class LLMResult(Generic[T]):
 
 def structured_call(instructions: str, user_input: str, schema: type[T],
                     max_output_tokens: int = 3000, caller: str = "llm") -> LLMResult[T]:
-    """One LLM call whose reply is parsed into `schema`. Never raises.
+    """One LLM call whose reply is parsed into `schema`. Never raises (except
+    for a broken application profile, which is a misconfiguration).
+
+    `instructions` may contain {app_name} / {app_label}; they are filled from
+    the application profile (app/prompts.py).
 
     `caller` is just a label for the `[llm]` log line below (e.g. "evidence",
     "critic") — it has no effect on the call itself. Pass it so the log shows
     WHICH agent triggered a given API call, not just that one happened.
     """
+    instructions = render_prompt(instructions)
     model = model_name()
     print(f"[llm] {caller}: calling {model} ({schema.__name__})")
     try:

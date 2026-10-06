@@ -29,6 +29,7 @@ from langgraph.graph import StateGraph, END
 from agents.critic import review_evidence
 from agents.evidence import extract_evidence
 from agents.synthesis import synthesize_answer, synthesize_baseline_answer
+from app.component_hints import component_hint
 from app.retrieval import make_plan, retrieve
 from app.schemas import (
     CritiqueFlag,
@@ -64,26 +65,23 @@ def supervisor(state: GraphState) -> dict:
     the question is phrased in business language that never names the
     component literally, e.g. "charged twice" rather than "PaymentClient").
 
-    STUBBED TODAY: a crude keyword check standing in for what will
-    eventually be an LLM classification call. This is intentionally
+    The component guess comes from the application profile's `scope.aliases`
+    (app/component_hints.py), so no application's names live in this file.
+    The type classification is still a crude keyword check standing in for
+    what will eventually be an LLM classification call. It is intentionally
     primitive — the POINT of a stub is that it's obviously not the real
     logic, so nobody mistakes it for a finished feature.
     """
     q_lower = state.question.lower()
     if "affect" in q_lower or "depend" in q_lower or "break" in q_lower:
         question_type = "impact_analysis"
-        target_component = "OrderService"  # stub guess; real version extracts this properly
     elif "incident" in q_lower or "charge" in q_lower or "bug" in q_lower:
         question_type = "incident_rca"
-        if "charge" in q_lower or "payment" in q_lower:
-            target_component = "PaymentClient"
-        elif "invent" in q_lower or "stock" in q_lower or "oversell" in q_lower:
-            target_component = "InventoryClient"
-        else:
-            target_component = None  # same stub-quality guess as impact_analysis above, not a real fix
     else:
         question_type = "business_functional"
-        target_component = None
+
+    # Only these two types read the code graph, so only they need a component.
+    target_component = component_hint(state.question) if question_type != "business_functional" else None
 
     print(f"[supervisor] classified as: {question_type}")
     return {

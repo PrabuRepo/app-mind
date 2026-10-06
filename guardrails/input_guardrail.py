@@ -13,7 +13,8 @@ TWO REAL CHECKS, IN ORDER:
    anything else touches the question text, so a PII-shaped question is
    never sent anywhere (including to OpenAI for embedding, see check 2).
 
-2. Topic relevance: rejects a question that isn't about OrderFlow at all.
+2. Topic relevance: rejects a question that isn't about the application at all
+   (the one named by the application profile; OrderFlow today).
    Off-topic questions used to be handled only downstream (empty retrieval
    -> confidence_gate -> escalate; still true, and still the fallback if
    this check's own API call fails) — that path works, but it means the
@@ -21,11 +22,13 @@ TWO REAL CHECKS, IN ORDER:
    confidence_gate) just to reach the same "no" a much cheaper check could
    give immediately. This embeds the question once (the same
    text-embedding-3-small call retrieval would make anyway) and compares it
-   against a fixed reference embedding of what OrderFlow's scope actually
-   is, via cosine similarity.
+   against a fixed reference embedding of what the application's scope actually
+   is, via cosine similarity. The reference text is `scope.description` in the
+   application profile (config/apps/<id>.yaml); a profile without one skips this
+   check entirely, and the downstream empty-retrieval path still applies.
 
    THRESHOLD IS MEASURED, NOT GUESSED — same discipline as rag/search.py's
-   own MIN_SCORE. Tested the fixed reference description below against all
+   own MIN_SCORE. Tested OrderFlow's reference description against all
    9 real eval-dataset questions (on-topic) and 7 genuinely off-topic ones:
    on-topic scored 0.28-0.61, off-topic scored -0.03-0.10 — a clean gap.
    0.18 sits in the middle of that gap with margin on both sides.
@@ -47,21 +50,15 @@ import re
 import time
 
 from app.schemas import GraphState
+from app_profile.registry import select_profile
 from rag.search import embed_query
 
 EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE_PATTERN = re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b")
 SSN_PATTERN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
-# See "Topic relevance" above for how this description and threshold were chosen.
-TOPIC_DESCRIPTION = (
-    "OrderFlow order-processing service: placing orders, payment processing, "
-    "PaymentClient, gateway timeouts, retries, and duplicate charges, "
-    "inventory reservation, InventoryClient, stock levels and oversell, "
-    "order confirmation notifications, NotificationService, incidents and "
-    "root cause investigations, and OrderFlow's architecture, source code, "
-    "and code dependencies."
-)
+# See "Topic relevance" above for how the description and threshold were chosen.
+# The threshold is a platform constant, not per-application config.
 MIN_TOPIC_SCORE = 0.18
 
 
@@ -77,10 +74,20 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 @functools.lru_cache(maxsize=1)
+def _topic() -> tuple[str, str | None]:
+    """(application name, scope description or None) from the application
+    profile. Cached: the profile is read once per process. A broken profile
+    raises here on purpose: a misconfiguration should be loud, not fail open."""
+    profile = select_profile()
+    return profile.app.name, profile.scope.description
+
+
+@functools.lru_cache(maxsize=1)
 def _topic_reference_vector() -> tuple[float, ...]:
     # Cached: this exact text only ever needs to be embedded once per process,
     # not once per question. Returned as a tuple so it's hashable for lru_cache.
-    return tuple(embed_query(TOPIC_DESCRIPTION, caller="input_guardrail_topic_reference"))
+    description = _topic()[1]
+    return tuple(embed_query(description, caller="input_guardrail_topic_reference"))
 
 
 def _topic_relevance_score(question: str) -> float | None:
@@ -108,15 +115,20 @@ def input_guardrail(state: GraphState) -> dict:
         )
         return update
 
+    app_name, description = _topic()
+    if description is None:
+        print("[input_guardrail] profile has no scope.description: topic relevance check skipped")
+        return update
+
     score = _topic_relevance_score(state.question)
     if score is not None:
         update["trace"] = update["trace"] + ["llm:embedding"]
         print(f"[input_guardrail] topic relevance score={score:.4f} (threshold={MIN_TOPIC_SCORE})")
         if score < MIN_TOPIC_SCORE:
-            print("[input_guardrail] BLOCKED: question does not appear to be about OrderFlow")
+            print(f"[input_guardrail] BLOCKED: question does not appear to be about {app_name}")
             update["blocked"] = True
             update["block_reason"] = (
-                f"the question does not appear to relate to OrderFlow "
+                f"the question does not appear to relate to {app_name} "
                 f"(topic relevance score {score:.2f}, below the {MIN_TOPIC_SCORE} threshold)"
             )
 

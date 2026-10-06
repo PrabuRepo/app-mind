@@ -36,7 +36,7 @@ targets.toml ──> resolve ref to a commit SHA ──> already indexed? ──
 indexer/
 ├── README.md, CONTRACT.md      this file, and the data contract
 ├── Dockerfile, requirements.txt
-├── targets.toml                the registry: which repos to index
+├── targets.example.toml        example registry; copy to targets.toml (generated in the AppMind repo)
 ├── appmind_indexer/
 │   ├── config.py               env-driven settings
 │   ├── registry.py             loads and validates targets.toml
@@ -62,7 +62,7 @@ environment; `.env` is not copied into the image.
 
 ### Adding a repository
 
-Add a block to `targets.toml`:
+The registry is `targets.toml` next to this folder (see `targets.example.toml`; inside the AppMind repo it is generated from the application profile instead, so edit the profile there). Add a block to it:
 
 ```toml
 [[target]]

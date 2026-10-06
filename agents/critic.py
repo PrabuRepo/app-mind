@@ -45,7 +45,7 @@ class CriticReview(BaseModel):
 
 CRITIC_INSTRUCTIONS = """\
 You are the Critic agent in a system that investigates questions about one \
-software application (OrderFlow). You are given a question and the evidence \
+software application ({app_name}). You are given a question and the evidence \
 gathered for it: numbered claims, each with its source, a verbatim quote, and \
 whether the quote was verified against the source. Your job is to find \
 problems that make it UNSAFE to answer the question from this evidence. You \

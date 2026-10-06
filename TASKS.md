@@ -61,7 +61,8 @@ consolidation now lives in `docs/documentation.md` §4.
 | Full reorg (`guardrails/`, `agents/`, `rag/`, `mcp_clients/`, `memory/`, `llm_as_judge/`, `evals/`) | Complete | all test suites re-verified passing after the move |
 | `orderflow-app/` local checkout | **Removed** | Deleted from this repo (it was a gitignored standalone clone, verified clean and fully pushed first). The code is now read from the code index; see the Decisions log entry "Code knowledge index (Phase 1)" |
 | git — `orderflow-app/` | Complete | committed to its own GitHub repo (`PrabuRepo/orderflow-app`), the only place the sample application lives |
-| Code knowledge index: `indexer/` + `code_context/` | Complete (Phase 1) | A self-contained indexer project writes a SHA-pinned dependency graph and source files to Postgres; AppMind reads them through `code_context/`. Design and phases (2: multi-repo and docs, 3: automation, 4: split the indexer into its own repo) in `features/code-index-design.md` |
+| Code knowledge index: `indexer/` + `code_context/` | Complete (Phase 1) | A self-contained indexer project writes a SHA-pinned dependency graph and source files to Postgres; AppMind reads them through `code_context/`. Design and phases (2: multi-repo and docs, 3: automation, 4: split the indexer into its own repo) in `features/code-index/code-index-design.md` |
+| Application profile (`app_profile/`, `config/apps/orderflow.yaml`) | Complete | One YAML file per application replaces the hardcoded OrderFlow values: ingestion folders, the topic guardrail text, the supervisor's component hints (`scope.aliases`) and the indexer's registry (generated `targets.toml`). Strict schema and loader, 6 new test modules, behavior verified unchanged. Design and decisions: `features/appmind-config/app-config-design.md`. Not done: per-application data isolation (global `docs`/`incidents` collections until a second app is onboarded), CI wiring for `python -m app_profile.check`, reachability and component-existence checks |
 | git — `app-mind/` (the rest: `app/`, `agents/`, `ingest/`, etc.) | Complete | initialized and committed to its own GitHub repo |
 | `llm_as_judge/` real implementation | Complete | `llm_as_judge/judge.py` is real and in active use by the eval harness, including its re-runs |
 | "One command to run everything" — full containerization (`Dockerfile`, `docker-entrypoint.py`, `app` service in `docker-compose.yml`) | Complete | Reverses the earlier "decided NOT to dockerize the UI/app tier" call below, now that the project is past submission and the earlier reasons (active development churn, not in scope yet) no longer apply. `docker compose up --build -d` boots all 4 containers; the app container auto-ingests into Qdrant on first boot only (checks point counts first, so a restart doesn't silently re-embed). README documents both this path and the original local-venv path side by side. See Decisions log for the auto-ingest design call and two real bugs found while building it |
@@ -546,7 +547,7 @@ not assume.
 Sources: [github/github-mcp-server README](https://github.com/github/github-mcp-server).
 
 ### Code knowledge index (Phase 1): local checkout removed
-Implements `features/code-index-design.md` Phase 0 and Phase 1. The goal: stop
+Implements `features/code-index/code-index-design.md` Phase 0 and Phase 1. The goal: stop
 depending on a local copy of the target repository, so AppMind can support
 other teams' repositories without copying them in, and take repository access
 off the question-answering path.
@@ -618,6 +619,35 @@ server or an in-process provider).
 - Phase 2 (multi-repo, docs, de-hardcoding OrderFlow from the supervisor and
   topic guardrail), Phase 3 (automation, GitHub App auth, freshness check) and
   Phase 4 (splitting `indexer/` into its own repository) remain.
+
+### Application profile: OrderFlow's hardcoded values moved to config
+Implements `features/appmind-config/app-config-design.md` §9, steps 1 to 7.
+
+- **What changed:** new `app_profile/` package (YAML loader, JSON Schema,
+  semantic checks, profile registry, indexer export) and `config/apps/orderflow.yaml`.
+  `DOMAIN_FOLDERS`, `TOPIC_DESCRIPTION` and the supervisor's component hints
+  were removed from code; the committed `indexer/targets.toml` became
+  `indexer/targets.example.toml` and the real one is generated and git-ignored.
+  Docker gained an `export-targets` one-shot service feeding the indexer.
+- **Verified unchanged:** ingestion chunks (docs 13, incidents 17) equal what
+  Qdrant holds, in the same order; guardrail text equals the removed constant
+  and live scores on the 9 dataset questions and 7 off-topic ones are as before;
+  exported targets equal the old registry; the indexer re-run confirmed the same
+  commit and snapshot; resolved components, code chunks and errors are identical
+  for all 9 dataset questions.
+- **Decision on component detection:** detecting the component from the code
+  graph was tried three ways and none found `PaymentClient` for "charged twice"
+  (see the design doc), so `scope.aliases` was added as a minimal config key.
+- **Deviations from the plan:** `targets.toml` was renamed to an example file
+  rather than deleted, which needed a one-line edit to the boundary test and
+  three indexer test files; the supervisor no longer defaults to `OrderService`
+  for an impact question that names no component.
+- **Follow-up:** the agent prompts and UI intro still named OrderFlow; they now
+  use `{app_name}`/`{app_label}` placeholders filled from the profile
+  (`app/prompts.py`), with the rendered prompts byte-identical to before.
+- **Not done:** per-application data isolation (needed before a second app),
+  CI wiring, the reachability and component-existence checks, the full 27-run
+  eval (only the retrieval path was compared, no LLM answers were regenerated).
 
 ## Explicitly deferred (do not build now)
 

@@ -6,6 +6,9 @@ from __future__ import annotations
 import pathlib
 
 FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "orderflow"
+# The registry example that ships with the indexer. The real targets.toml may be
+# absent (in the AppMind repo it is generated), so tests never depend on it.
+EXAMPLE_TARGETS = pathlib.Path(__file__).resolve().parent.parent / "targets.example.toml"
 
 
 class Checker:

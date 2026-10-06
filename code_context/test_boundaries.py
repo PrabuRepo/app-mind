@@ -28,7 +28,7 @@ INDEXER_DIR = PROJECT_ROOT / "indexer"
 # Every top-level package of AppMind (the repo root's own modules count too).
 APPMIND_PACKAGES = {
     "app", "agents", "rag", "memory", "mcp_servers", "mcp_clients", "guardrails",
-    "ingest", "evals", "llm_as_judge", "ui", "code_context",
+    "ingest", "evals", "llm_as_judge", "ui", "code_context", "app_profile",
 }
 # Sample source code the indexer's extractor is tested on; it is DATA, not
 # indexer code, and legitimately imports things like `app.models`.
@@ -93,7 +93,7 @@ def main() -> int:
           all(name in requirements for name in ("psycopg", "httpx", "python-dotenv")))
     check("its requirements.txt does not drag in AppMind-only packages",
           not any(name in requirements for name in ("langgraph", "streamlit", "openai", "qdrant", "mcp")))
-    for required in ("README.md", "CONTRACT.md", "Dockerfile", "requirements.txt", "targets.toml"):
+    for required in ("README.md", "CONTRACT.md", "Dockerfile", "requirements.txt", "targets.example.toml"):
         check(f"indexer/{required} exists (a repo needs it standalone)", (INDEXER_DIR / required).is_file())
 
     print(f"\n{'ALL CHECKS PASSED' if not failures else f'{len(failures)} CHECK(S) FAILED: ' + '; '.join(failures)}")

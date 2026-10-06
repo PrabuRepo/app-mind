@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:appmind:schema:app-profile:v1",
+  "title": "AppMind application profile (core)",
+  "description": "Describes ONE application onboarded to AppMind: who it is and where its knowledge lives. Required: schema_version, app (id and name), and at least one code repository. Everything else is optional with a default. Unknown keys are errors, so a typo is caught, and a key is only in this schema once AppMind actually honors it. Secrets are never stored here, only the NAME of the environment variable that holds one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "app", "sources"],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of this schema. Changes only for a breaking change."
+    },
+
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier", "description": "Stable machine id, used in logs and storage names." },
+        "name": { "type": "string", "minLength": 1, "description": "Display name, used in prompts and the UI." },
+        "description": { "type": "string", "minLength": 1, "description": "A short phrase that follows the name in prompts, for example 'an order-processing service' (so a prompt reads 'OrderFlow, an order-processing service'). Optional." },
+        "owners": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Teams or people to contact about this app."
+        }
+      }
+    },
+
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional. Without it the off-topic guardrail is skipped and an off-topic question is still caught later, when retrieval finds nothing relevant.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 40,
+          "description": "Prose describing the application's domain. The input guardrail compares each question to it, so write it the way a question about the app would sound."
+        },
+        "aliases": {
+          "type": "object",
+          "description": "Optional. Maps a code component (a class or module name in the indexed code) to words that mean it, for questions that never name it, for example 'charged twice' meaning PaymentClient. Used only for incident and impact questions, and only when the question does not name a component itself. A word matches as a case-insensitive part of a word, so 'invent' matches 'inventory'. When several components match, the first one listed wins.",
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 3, "pattern": "^\\S+$" }
+          }
+        }
+      }
+    },
+
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "description": "Where the application's knowledge lives.",
+      "properties": {
+        "code": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/codeSource" },
+          "description": "Code repositories, indexed into a dependency graph and source files."
+        },
+        "docs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/documentSource" },
+          "description": "Architecture, requirements, runbooks."
+        },
+        "incidents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/documentSource" },
+          "description": "Incident reports and postmortems. Kept separate from docs because incident questions weight them differently."
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,40}$" },
+    "repoName": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "owner/name" },
+
+    "secretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secret"],
+      "description": "A reference to a secret, never the secret itself.",
+      "properties": {
+        "secret": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "NAME of the environment variable that holds the secret."
+        }
+      }
+    },
+
+    "codeSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/repoName" },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "default": "main",
+          "description": "Branch or tag. Resolved to an immutable commit SHA when indexed."
+        },
+        "source_root": {
+          "type": "string",
+          "default": ".",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).*$",
+          "description": "Directory inside the repo that holds the code (for example 'src'). Must be relative and stay inside the repo."
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Glob patterns to skip, for example **/tests/**. Directories like .venv and node_modules are always skipped."
+        },
+        "auth": {
+          "$ref": "#/$defs/secretRef",
+          "description": "Optional. Defaults to the platform's GITHUB_TOKEN."
+        }
+      }
+    },
+
+    "documentSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Give the location in exactly one way: a local path, or a repo plus path globs.",
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "A local file or folder." },
+        "repo": { "$ref": "#/$defs/repoName" },
+        "ref": { "type": "string", "minLength": 1, "default": "main" },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "description": "Glob patterns inside the repo, for example docs/**/*.md."
+        },
+        "auth": { "$ref": "#/$defs/secretRef" }
+      },
+      "oneOf": [
+        { "required": ["path"] },
+        { "required": ["repo", "paths"] }
+      ]
+    }
+  }
+}

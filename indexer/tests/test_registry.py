@@ -6,7 +6,7 @@ import tempfile
 import pathlib
 
 from appmind_indexer.registry import RegistryError, load_targets
-from tests.helpers import Checker
+from tests.helpers import EXAMPLE_TARGETS, Checker
 
 
 def _load_text(text: str):
@@ -27,8 +27,8 @@ def _raises(text: str) -> bool:
 def main() -> int:
     check = Checker()
 
-    check.section("the shipped targets.toml")
-    targets = load_targets()
+    check.section("the shipped targets.example.toml")
+    targets = load_targets(EXAMPLE_TARGETS)
     check("has at least one target", len(targets) >= 1)
     check("repo is owner/name", "/" in targets[0].repo, targets[0].repo)
 

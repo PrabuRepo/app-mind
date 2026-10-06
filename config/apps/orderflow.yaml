@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=../../app_profile/appmind-app.schema.json
+#
+# The application profile AppMind serves: OrderFlow. Design and field
+# reference: features/appmind-config/app-config-design.md.
+# Validate with: python -m app_profile.check
+
+schema_version: 1
+
+app:
+  id: orderflow
+  name: OrderFlow
+  description: an order-processing service
+  owners: [team-orders]
+
+# Text the input guardrail compares each question to. Without it the off-topic
+# check is skipped.
+scope:
+  description: >-
+    OrderFlow order-processing service: placing orders, payment processing,
+    PaymentClient, gateway timeouts, retries, and duplicate charges,
+    inventory reservation, InventoryClient, stock levels and oversell,
+    order confirmation notifications, NotificationService, incidents and
+    root cause investigations, and OrderFlow's architecture, source code,
+    and code dependencies.
+
+  # Components that questions describe without naming ("charged twice" means
+  # PaymentClient). Used only for incident and impact questions, and only when
+  # the question does not name a component itself. A word matches as part of a
+  # word ("invent" matches "inventory"); the first listed component wins.
+  aliases:
+    PaymentClient: [payment, charge]
+    InventoryClient: [invent, stock, oversell]
+
+sources:
+  code:
+    - repo: PrabuRepo/orderflow-app
+      exclude: ["**/tests/**"]
+      # Defaults, so they can be omitted:
+      #   ref: main
+      #   source_root: .
+      #   auth: { secret: GITHUB_TOKEN }
+  docs: [{ path: knowledge-domains/docs }]
+  incidents: [{ path: knowledge-domains/incidents }]

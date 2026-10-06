@@ -40,6 +40,24 @@ this repo** — the indexer reads it from GitHub (see "Knowledge domains"):
   deterministically from the AST server's real dependency graph, e.g. "What
   would be affected if we changed PaymentClient's retry logic?"
 
+## Application profile (what makes the platform generic)
+
+Everything specific to the application AppMind serves lives in one YAML file,
+`config/apps/<id>.yaml` (here `orderflow.yaml`), loaded and validated by
+`app_profile/` against `app_profile/appmind-app.schema.json` (unknown keys are
+errors; secrets are env-var names only). It lists `sources.code` (repos),
+`sources.docs` and `sources.incidents` (local folders), and optionally
+`scope.description` (the off-topic guardrail's reference text) and
+`scope.aliases` (component name → words that mean it, for questions that never
+name the component). `APPMIND_APP` picks the profile; a single file is picked
+automatically. Ingestion, the input guardrail, the supervisor and
+`code_context.target_repo()` read it, and the agent prompts and UI intro
+take the app's name and description from it (`app/prompts.py`); the indexer gets it as a generated
+`indexer/targets.toml` (`python -m app_profile.export_targets`), never by import.
+Thresholds and limits are code defaults, not config. Design:
+`features/appmind-config/app-config-design.md`. **Do not hardcode OrderFlow
+names in platform code** — add them to the profile.
+
 ## Knowledge domains
 
 - **Code: a graph + source-file index, NOT RAG.** A deliberate architecture
@@ -50,7 +68,7 @@ this repo** — the indexer reads it from GitHub (see "Knowledge domains"):
   time**: answering a question never contacts GitHub or a local checkout.
   - **`indexer/`** — a **self-contained project** (own README, Dockerfile,
     requirements, tests; imports nothing from AppMind) that downloads each
-    repo in `indexer/targets.toml` at a pinned commit SHA, builds a static
+    code repo in the application profile (exported to a generated `indexer/targets.toml`) at a pinned commit SHA, builds a static
     dependency/call graph (4-pass AST analysis), and writes the graph and
     source files to Postgres in one transaction per repo. It is built to move
     to its own repository later. Its only interface with AppMind is the data
@@ -65,7 +83,7 @@ this repo** — the indexer reads it from GitHub (see "Knowledge domains"):
     snapshot file exported from Postgres, never parses code or reads a repo.
   - **GitHub MCP client** (`mcp_clients/github_client.py`) — kept as an
     optional live fallback; no longer on the default path.
-  - Design and rationale: `features/code-index-design.md`.
+  - Design and rationale: `features/code-index/code-index-design.md`.
 - **RAG domains: `docs` + `incidents` only** (2 Qdrant collections, kept
   separate so each has its own top-k policy per question type). Source
   files in `knowledge-domains/docs/` (3 files) and `knowledge-domains/incidents/`
@@ -130,7 +148,8 @@ app.graph` runs a live smoke test).
 - `.env` at the repo root (template: `setup-files/.env.example`) —
   `OPENAI_API_KEY`, `GITHUB_TOKEN` (a fine-grained, read-only PAT, used by the
   indexer), `GITHUB_TARGET_REPO` (also passed to the app as
-  `APPMIND_CODE_REPO`, which repo code questions are about),
+  `APPMIND_CODE_REPO`, an optional override of which repo code questions are
+  about; the default is the application profile's first code repo),
   Postgres/Qdrant/Redis connection settings. `APPMIND_EVAL_SNAPSHOT=<sha>`
   pins the eval harness's impact-analysis ground truth to an exact commit.
 

@@ -29,6 +29,7 @@ import streamlit as st
 
 from app.investigate import investigate
 from app.schemas import PipelineMode
+from app_profile.registry import select_profile
 
 st.set_page_config(page_title="AppMind", page_icon="\U0001f9e0")
 
@@ -67,7 +68,7 @@ def _escalation_reasons(confidence_rationale: str) -> list[tuple[str, str]]:
 
 st.title("AppMind")
 st.caption(
-    "Ask a question about OrderFlow. AppMind investigates, cites its sources, "
+    f"Ask a question about {select_profile().app.name}. AppMind investigates, cites its sources, "
     "and escalates instead of guessing when it isn't confident enough."
 )
 
